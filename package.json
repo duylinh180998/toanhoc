@@ -1,0 +1,18 @@
+{
+  "name": "mathgraph-arena",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Game đối kháng 2D theo lượt: ngắm bắn bằng đồ thị hàm số f(x), địa hình phá huỷ được.",
+  "type": "module",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "build": "node tools/build.mjs",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "mathjs": "13.2.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
