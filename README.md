@@ -1,5 +1,7 @@
 # MathGraph Arena
 
+🎮 **Chơi ngay:** https://duylinh180998.github.io/toanhoc/ · bản 1 file: https://duylinh180998.github.io/toanhoc/mathgraph-arena.html
+
 Game đối kháng 2D theo lượt: **ngắm bắn bằng đồ thị hàm số**. Thay vì chỉnh góc và lực, bạn nhập `f(x)` — tia đạn chính là đồ thị của hàm số, vẽ dần từ vị trí nhân vật trên hệ trục Oxy, phá huỷ địa hình khi va chạm.
 
 - **1v1** hoặc **2v2** (có sát thương đồng đội), lượt luân phiên A1 → B1 → A2 → B2, 30 giây/lượt.
@@ -24,7 +26,7 @@ Hoặc bất kỳ static server nào: `python3 -m http.server 5173`, `npx serve 
 
 | Cách | Làm gì |
 | --- | --- |
-| **GitHub Pages** (tự động) | Vào *Settings → Pages → Build and deployment → Source* chọn **GitHub Actions** (làm 1 lần). Mỗi lần push lên `main`, workflow `.github/workflows/deploy.yml` sẽ chạy test, build và deploy. Game ở `https://<user>.github.io/<repo>/`, bản 1 file ở `…/mathgraph-arena.html`. |
+| **GitHub Pages** (đang dùng) | Pages phục vụ từ nhánh **`gh-pages`**, nhánh này chỉ chứa bản build (*Settings → Pages → Deploy from a branch → gh-pages / root*). Mỗi lần push lên `main`, workflow `.github/workflows/deploy.yml` chạy test, build rồi ghi đè bản mới lên `gh-pages`. Khoảng 1 phút sau trang tự cập nhật. Repo khác: GitHub tự bật Pages ngay lần đầu có nhánh `gh-pages`, nếu không thì chọn như trên. Game ở `https://<user>.github.io/<repo>/`. |
 | **Netlify / Vercel / Cloudflare Pages** | Kéo-thả cả thư mục, hoặc kết nối repo với *build command* để trống, *publish directory* là `.` (thư mục gốc). |
 | **Một file HTML duy nhất** | `npm install && npm run build` → `dist/mathgraph-arena.html` (~890 KB, đã nhúng math.js). Chơi chung máy offline 100%, mở bằng double-click; chơi online thì cần Internet (tải PeerJS từ CDN). |
 

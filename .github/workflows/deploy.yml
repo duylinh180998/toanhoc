@@ -1,5 +1,9 @@
 name: Test & Deploy (GitHub Pages)
 
+# GitHub Pages của repo này phục vụ từ nhánh `gh-pages` (Settings → Pages → Deploy from a branch).
+# Mỗi lần push lên `main`: chạy test → build → ghi đè bản build mới lên nhánh `gh-pages`.
+# Pull request chỉ chạy test + build (không deploy).
+
 on:
   push:
     branches: [main]
@@ -7,16 +11,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write # để đẩy bản build lên nhánh gh-pages
 
 concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,23 +29,23 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
       - name: Chuẩn bị thư mục site
         run: |
           mkdir -p _site
           cp -r index.html css js _site/
           cp dist/mathgraph-arena.html _site/
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
+          touch _site/.nojekyll
 
-  deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/configure-pages@v5
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Đẩy lên nhánh gh-pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        working-directory: _site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q -b gh-pages
+          git add -A
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Deploy ${GITHUB_SHA::7}"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
