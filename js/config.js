@@ -48,21 +48,50 @@ export const TURN = Object.freeze({
 });
 
 /**
- * Chơi online P2P (WebRTC qua thư viện PeerJS) — không cần server riêng, không cần database.
- * `server`: null = dùng máy chủ bắt tay (signaling) công cộng miễn phí của PeerJS.
- *           Có thể tự host bằng `npx peerjs --port 9000` rồi đặt 'https://ten-mien-cua-ban/' hoặc
- *           thêm tham số ?peer=http://localhost:9000/ vào URL khi test.
+ * Chơi online — không cần server riêng, không cần database. Hai kiểu kết nối:
+ *
+ * 1) P2P (WebRTC qua PeerJS): hai trình duyệt nói chuyện trực tiếp. Máy chủ PeerJS công cộng chỉ
+ *    giúp "bắt tay". Nhanh nhất, nhưng có thể bị chặn bởi NAT nhiều tầng (4G, CGNAT) hoặc tường lửa.
+ *    `server`: null = máy chủ bắt tay công cộng; tự host: `npx peerjs --port 9000` rồi đặt
+ *    'https://ten-mien-cua-ban/' (hoặc thêm ?peer=http://localhost:9000/ vào URL khi test).
+ *
+ * 2) Chuyển tiếp (relay) qua MQTT công cộng: dự phòng tự động khi P2P không thông sau `p2pTimeout`.
+ *    Mọi máy chỉ cần mở được WebSocket bảo mật (wss://) tới một máy chủ MQTT miễn phí trong
+ *    `relayBrokers` ⇒ đi qua được hầu hết NAT/tường lửa. Có thể thay danh sách bằng ?mqtt=url1,url2.
+ *    Ép dùng chuyển tiếp (bỏ qua P2P): thêm ?net=relay vào URL.
  */
 export const NET = Object.freeze({
-  protocol: 1,                    // tăng khi đổi định dạng tin nhắn ⇒ máy khác phiên bản sẽ bị từ chối
+  protocol: 2,                    // tăng khi đổi định dạng tin nhắn ⇒ máy khác phiên bản sẽ bị từ chối
   peerPrefix: 'mathgraph-arena-', // ID trên máy chủ PeerJS = tiền tố + mã phòng
   codeAlphabet: 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', // bỏ các ký tự dễ nhầm: I, L, O, 0, 1
   codeLength: 6,
   server: null,
-  connectTimeout: 12_000,         // ms
+  connectTimeout: 12_000,         // ms chờ máy chủ bắt tay PeerJS
+  p2pTimeout: 7_000,              // ms thử P2P trước khi chuyển sang kênh chuyển tiếp
+  relayTimeout: 12_000,           // ms chờ vào phòng qua kênh chuyển tiếp
   heartbeat: 2_000,               // ms giữa 2 lần ping
   dropAfter: 15_000,              // ms không nhận được gì ⇒ coi như mất kết nối
   timeoutGrace: 0.6,              // giây chủ phòng chờ thêm sau khi hết giờ (bù độ trễ mạng)
+
+  /**
+   * Máy STUN/TURN cho WebRTC. STUN giúp tìm địa chỉ công khai; TURN chuyển tiếp khi NAT quá chặt.
+   * Muốn P2P ổn định hơn nữa: đăng ký TURN miễn phí (Metered, ExpressTURN, Cloudflare…) rồi thêm
+   * { urls: ['turns:ten-may:443?transport=tcp'], username: '…', credential: '…' } vào đây.
+   */
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+    // TURN công cộng mặc định của PeerJS (dùng chung, không đảm bảo).
+    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  ],
+
+  /** Máy chủ MQTT công cộng (WebSocket bảo mật) cho kênh chuyển tiếp — nối song song, dùng cái nhanh nhất. */
+  relayBrokers: [
+    'wss://broker.emqx.io:8084/mqtt',
+    'wss://broker.hivemq.com:8884/mqtt',
+    'wss://mqtt.eclipseprojects.io:443/mqtt',
+    'wss://test.mosquitto.org:8081/mqtt',
+  ],
+  relayTopic: 'mathgraph-arena', // tiền tố topic MQTT
 });
 
 /** Số đồ thị cũ được giữ lại dạng nét mờ để căn chỉnh. */

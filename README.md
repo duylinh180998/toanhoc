@@ -37,7 +37,12 @@ Hoặc bất kỳ static server nào: `python3 -m http.server 5173`, `npx serve 
 3. Trong sảnh, mọi người có thể bấm vào ghế trống để đổi chỗ. Chủ phòng chọn chế độ, thời gian lượt, sát thương đồng đội rồi bấm **Bắt đầu trận**.
 4. 2v2 không cần đủ 4 người: ghế trống do đồng đội cùng đội điều khiển thay (vd. 2 người, mỗi người điều khiển 2 nhân vật).
 
-**Cách hoạt động.** Các trình duyệt nối trực tiếp với nhau bằng WebRTC qua thư viện [PeerJS](https://peerjs.com/). Máy chủ PeerJS công cộng (miễn phí) chỉ giúp hai bên tìm thấy nhau lúc bắt tay. Dữ liệu trận đấu không đi qua đó, và không có gì được lưu lại. Trạng thái phòng nằm trong bộ nhớ trình duyệt của **chủ phòng**:
+**Cách hoạt động.** Không có server riêng, không có database. Trạng thái phòng nằm trong bộ nhớ trình duyệt của **chủ phòng**. Có hai đường kết nối, game tự chọn:
+
+1. **Trực tiếp (P2P, WebRTC qua [PeerJS](https://peerjs.com/))**: nhanh nhất. Máy chủ PeerJS công cộng chỉ giúp hai bên "bắt tay".
+2. **Kênh chuyển tiếp (MQTT công cộng)**: dùng tự động khi P2P không thông sau ~7 giây. Các trường hợp hay gặp: mạng 4G hay mạng gia đình dùng NAT nhiều tầng (CGNAT), tường lửa công ty chặn UDP. Mọi máy chỉ cần mở được kết nối `wss://` ra ngoài tới một máy chủ MQTT miễn phí trong `NET.relayBrokers`. Các máy nối song song tới nhiều máy chủ và dùng cái nhanh nhất. Game theo lượt nên độ trễ thêm ~0.1 giây không ảnh hưởng.
+
+Trong sảnh chờ, mỗi người có nhãn **P2P** hoặc **Chuyển tiếp** để biết họ đang kết nối kiểu nào. Nếu máy chủ PeerJS sập, chủ phòng vẫn mở được phòng và nhận khách qua kênh chuyển tiếp.
 
 - Mọi người kết nối tới chủ phòng (hình sao). Chủ phòng kiểm tra từng hành động (đổi hướng, phép, bắn) rồi phát lại cho cả phòng.
 - Vì cùng seed bản đồ và cùng hành động, mỗi máy tự mô phỏng ra cùng một phát bắn. Mỗi lượt chỉ tốn vài chục byte.
@@ -45,20 +50,23 @@ Hoặc bất kỳ static server nào: `python3 -m http.server 5173`, `npx serve 
 - Chỉ chủ phòng quyết định chuyển lượt, hết giờ (có cộng 0.6 giây bù độ trễ mạng) và thắng/thua.
 - Có người rời phòng: đồng đội điều khiển thay. Một đội không còn ai thì đội đó thua. Chủ phòng rời thì phòng đóng.
 
-**Test online ngay trên 1 máy:** chạy `npm start`, mở `http://localhost:5173` ở **2 tab** (hoặc 1 tab thường + 1 tab ẩn danh), tab này tạo phòng, tab kia vào phòng. Muốn thử bằng điện thoại cùng mạng Wi-Fi thì mở `http://<IP-máy-tính>:5173`.
+**Test online ngay trên 1 máy:** chạy `npm start`, mở `http://localhost:5173` ở **2 tab** (hoặc 1 tab thường + 1 tab ẩn danh), tab này tạo phòng, tab kia vào phòng. Lưu ý: 2 tab trên cùng máy **luôn** nối được P2P, nên không kiểm tra được trường hợp mạng chặn. Muốn thử kênh chuyển tiếp, thêm `?net=relay` vào URL của người vào phòng (bỏ qua P2P). Muốn thử bằng điện thoại cùng mạng Wi-Fi thì mở `http://<IP-máy-tính>:5173`.
 
-**Tự host máy chủ bắt tay** (khi máy chủ công cộng chậm/hỏng, hoặc mạng chặn nó):
+**Tham số URL nâng cao**
 
-```bash
-npx peerjs --port 9000          # chạy PeerServer
-# rồi mở game với: http://localhost:5173/?peer=http://localhost:9000/
-```
+| Tham số | Tác dụng |
+| --- | --- |
+| `?net=relay` | Vào phòng thẳng bằng kênh chuyển tiếp (bỏ qua P2P). |
+| `?peer=https://may-chu-peerjs/` | Dùng máy chủ bắt tay PeerJS tự host (`npx peerjs --port 9000`). |
+| `?mqtt=wss://broker1/mqtt,wss://broker2/mqtt` | Dùng máy chủ MQTT riêng cho kênh chuyển tiếp. |
 
-Hoặc đặt `NET.server` trong `js/config.js` thành địa chỉ server của bạn (vd. `'https://peer.ten-mien.com/'`).
+Link mời tự giữ các tham số `peer`, `mqtt`. Muốn đặt cố định thì sửa `NET.server` / `NET.relayBrokers` trong `js/config.js`.
+
+**Muốn P2P ổn định hơn nữa (tuỳ chọn):** đăng ký một máy chủ TURN miễn phí (Metered, ExpressTURN, Cloudflare…) rồi thêm vào `NET.iceServers`, ví dụ `{ urls: ['turns:ten-may:443?transport=tcp'], username: '…', credential: '…' }`.
 
 **Giới hạn cần biết**
 - Chủ phòng phải giữ tab mở suốt trận. Tab bị ẩn vẫn chạy nhưng trình duyệt có thể làm chậm.
-- Một số mạng công ty, trường học hoặc 4G chặn kết nối trực tiếp. PeerJS đã kèm sẵn máy chủ TURN công cộng để chuyển tiếp, nhưng không đảm bảo luôn thành công.
+- Kênh chuyển tiếp đi qua máy chủ MQTT **công cộng**: miễn phí, không đảm bảo luôn sống, và ai biết mã phòng cũng có thể "nghe" được nước đi (không có dữ liệu cá nhân nào được gửi).
 - Rớt mạng giữa trận thì không vào lại được trận đó, phải chờ trận sau.
 
 ## Cách chơi
@@ -96,7 +104,8 @@ js/
   core/player.js      nhân vật, phép trợ giúp, trọng lực
   core/game.js        máy trạng thái trận đấu: lượt, bắn, nổ, sát thương, thắng/thua, bản chốt online
   net/peer.js         tải PeerJS, mã phòng, link mời, máy chủ bắt tay tự host
-  net/online.js       phòng online: sảnh, ghế, giao thức tin nhắn, chủ phòng quyết định, heartbeat
+  net/relay.js        kênh chuyển tiếp qua MQTT công cộng (dự phòng khi P2P bị chặn)
+  net/online.js       phòng online: sảnh, ghế, giao thức tin nhắn, P2P → chuyển tiếp, heartbeat
   render/renderer.js  vẽ canvas (lưới, trục tương đối, đồ thị phát sáng, nhân vật, công cụ ngắm)
   render/effects.js   hạt, sóng xung kích, chữ bay, rung màn hình
   audio/sfx.js        âm thanh WebAudio tổng hợp

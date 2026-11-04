@@ -2250,3 +2250,15 @@ code {
     flex: 1;
   }
 }
+
+.tag.p2p {
+  color: #b7f7cf;
+  background: rgba(74, 222, 128, 0.08);
+  border-color: rgba(74, 222, 128, 0.25);
+}
+
+.tag.relay {
+  color: #fde68a;
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.32);
+}

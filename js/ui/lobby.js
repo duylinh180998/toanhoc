@@ -142,7 +142,7 @@ export class LobbyUI {
     this.setBusy(true);
     this.setStatus(`Đang kết nối tới phòng ${code}…`, 'info');
     try {
-      await this.session.join(code, this.playerName());
+      await this.session.join(code, this.playerName(), { onStatus: (text) => this.setStatus(text, 'info') });
       this.setStatus('');
     } catch (err) {
       this.setStatus(err.message, 'error');
@@ -234,6 +234,9 @@ export class LobbyUI {
       this.updateBadge();
     });
     session.on('left', () => this.updateBadge());
+    session.on('net', () => {
+      if (this.visible) this.render();
+    });
   }
 
   show() {
@@ -250,7 +253,12 @@ export class LobbyUI {
   updateBadge() {
     const { session, el } = this;
     el.badge.hidden = !session.active;
-    if (session.active) el.badgeText.textContent = `Phòng ${session.code}`;
+    if (session.active) {
+      el.badgeText.textContent = `Phòng ${session.code}`;
+      el.badge.title = session.transport === 'relay'
+        ? 'Đang chơi online qua kênh chuyển tiếp'
+        : 'Đang chơi online (P2P)';
+    }
   }
 
   /** Vẽ lại sảnh theo trạng thái phòng (mọi máy dùng chung dữ liệu chủ phòng gửi). */
@@ -305,6 +313,8 @@ export class LobbyUI {
           name.textContent = member.name;
           if (member.id === lobby.hostId) tags.insertAdjacentHTML('beforeend', '<i class="tag host">Chủ phòng</i>');
           if (member.id === session.myId) tags.insertAdjacentHTML('beforeend', '<i class="tag me">Bạn</i>');
+          if (member.via === 'relay') tags.insertAdjacentHTML('beforeend', '<i class="tag relay" title="Mạng chặn P2P — đi qua máy chủ chuyển tiếp">Chuyển tiếp</i>');
+          else if (member.via === 'p2p') tags.insertAdjacentHTML('beforeend', '<i class="tag p2p" title="Kết nối trực tiếp">P2P</i>');
         } else {
           name.textContent = 'Trống';
           tags.textContent = lobby.mode === '2v2' ? 'Bấm để ngồi · bỏ trống thì đồng đội điều khiển thay' : 'Bấm để ngồi';
@@ -324,6 +334,14 @@ export class LobbyUI {
     if (isHost) status += blocker ? `${blocker} Gửi link mời cho bạn bè!` : 'Sẵn sàng! Bấm “Bắt đầu trận”.';
     else status += 'Đang chờ chủ phòng bắt đầu…';
     if (me) status += ` Bạn ngồi ghế ${me.seat}.`;
+    if (isHost) {
+      status += session.peer ? ' Kết nối: P2P sẵn sàng' : ' Kết nối: chỉ qua kênh chuyển tiếp';
+      status += session.relayReady > 0 ? ' · kênh dự phòng sẵn sàng.' : ' · kênh dự phòng đang kết nối…';
+    } else {
+      status += session.transport === 'relay'
+        ? ' Bạn đang kết nối qua kênh chuyển tiếp (mạng chặn P2P).'
+        : ' Bạn đang kết nối trực tiếp (P2P).';
+    }
     el.lobbyStatus.textContent = status;
 
     // Bản đồ xem trước phía sau sảnh (chỉ minh hoạ — bản đồ thật do chủ phòng chọn khi bắt đầu).

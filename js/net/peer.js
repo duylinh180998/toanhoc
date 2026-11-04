@@ -36,12 +36,13 @@ function customServer() {
 }
 
 function peerOptions() {
+  const base = { debug: 1, config: { iceServers: NET.iceServers } };
   const custom = customServer();
-  if (!custom) return { debug: 1 };
+  if (!custom) return base;
   const url = new URL(custom);
   const secure = url.protocol === 'https:';
   return {
-    debug: 1,
+    ...base,
     host: url.hostname,
     port: Number(url.port) || (secure ? 443 : 80),
     path: url.pathname || '/',
@@ -102,14 +103,14 @@ export function normalizeCode(raw) {
 
 export const peerIdFor = (code) => `${NET.peerPrefix}${code}`;
 
-/** Link mời: giữ nguyên ?peer=… nếu đang dùng máy chủ bắt tay tự host. */
+/** Link mời: giữ nguyên ?peer=… / ?mqtt=… nếu đang dùng máy chủ tự host. */
 export function inviteLink(code) {
   const url = new URL(location.href);
   url.hash = '';
-  const peer = url.searchParams.get('peer');
+  const keep = ['peer', 'mqtt'].map((k) => [k, url.searchParams.get(k)]).filter(([, v]) => v);
   url.search = '';
   url.searchParams.set('room', code);
-  if (peer) url.searchParams.set('peer', peer);
+  for (const [k, v] of keep) url.searchParams.set(k, v);
   return url.toString();
 }
 

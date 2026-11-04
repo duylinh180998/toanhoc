@@ -22,6 +22,7 @@
 import { DEFAULT_NAMES, NET } from '../config.js';
 import { Emitter, randomSeed } from '../utils.js';
 import { createPeer, describePeerError, inviteLink, loadPeerJs, makeRoomCode, peerIdFor } from './peer.js';
+import { RelayHub, RelayLink, randomId, relayForced } from './relay.js';
 
 export const SEAT_ORDER = Object.freeze({ '1v1': ['A1', 'B1'], '2v2': ['A1', 'B1', 'A2', 'B2'] });
 
@@ -57,7 +58,12 @@ export class OnlineSession extends Emitter {
     clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
     this.role = null;        // 'host' | 'guest' | null
-    this.peer = null;
+    this.peer = null;        // Peer của PeerJS (null nếu không dùng được P2P)
+    this.relay = null;       // (chủ phòng) RelayHub — nhận khách qua kênh chuyển tiếp
+    this.relayReady = 0;     // (chủ phòng) số máy chủ chuyển tiếp đang nối
+    this.selfId = null;      // id của máy này trong phòng
+    this.transport = null;   // (khách) 'p2p' | 'relay'
+    this.clientIds = new Map(); // (chủ phòng) id thành viên → clientId (chống vào trùng 2 lần)
     this.code = null;
     this.lobby = null;
     this.owners = {};        // ghế → id người điều khiển
@@ -76,7 +82,7 @@ export class OnlineSession extends Emitter {
   }
 
   get myId() {
-    return this.peer?.id ?? null;
+    return this.selfId;
   }
 
   get me() {
@@ -99,39 +105,66 @@ export class OnlineSession extends Emitter {
   /* ═══════════════════════════════ CHỦ PHÒNG ═══════════════════════════════ */
 
   async host({ name, mode, turnTime, friendlyFire }) {
-    await loadPeerJs();
+    // 1) Giữ mã phòng trên máy chủ bắt tay PeerJS (để khách nối P2P).
     let peer = null;
     let code = null;
     let lastError = null;
-    for (let attempt = 0; attempt < 4 && !peer; attempt++) {
-      code = makeRoomCode();
-      try {
-        peer = await createPeer(peerIdFor(code));
-      } catch (err) {
-        lastError = err;
-        if (err.type !== 'unavailable-id') break; // trùng mã thì thử mã khác
+    try {
+      await loadPeerJs();
+      for (let attempt = 0; attempt < 4 && !peer; attempt++) {
+        code = makeRoomCode();
+        try {
+          peer = await createPeer(peerIdFor(code));
+        } catch (err) {
+          lastError = err;
+          if (err.type !== 'unavailable-id') break; // trùng mã thì thử mã khác
+        }
       }
+    } catch (err) {
+      lastError = err;
     }
-    if (!peer) throw new Error(describePeerError(lastError));
+    code = code ?? makeRoomCode();
+
+    // 2) Kênh chuyển tiếp (dự phòng cho khách bị chặn P2P) — chạy song song.
+    const relay = new RelayHub(code);
+    relay.on('connection', (conn) => this.acceptConnection(conn));
+    relay.on('status', (count) => {
+      this.relayReady = count;
+      this.emit('net');
+    });
+    relay.start();
+    if (!peer) {
+      // Máy chủ PeerJS lỗi: vẫn mở phòng nếu kênh chuyển tiếp dùng được.
+      const ok = await relay.whenReady(NET.relayTimeout);
+      if (!ok) {
+        relay.stop();
+        throw new Error(`${describePeerError(lastError)} Kênh chuyển tiếp cũng không khả dụng.`);
+      }
+      this.emit('notice', 'Máy chủ P2P đang lỗi — phòng chỉ nhận khách qua kênh chuyển tiếp.');
+    }
 
     this.role = 'host';
     this.peer = peer;
+    this.relay = relay;
     this.code = code;
+    this.selfId = peer?.id ?? `h-${randomId()}`;
     this.lobby = {
       code,
-      hostId: peer.id,
+      hostId: this.selfId,
       mode,
       turnTime,
       friendlyFire,
       inGame: false,
-      members: [{ id: peer.id, name: cleanName(name, 'Chủ phòng'), seat: 'A1' }],
+      members: [{ id: this.selfId, name: cleanName(name, 'Chủ phòng'), seat: 'A1', via: 'host' }],
     };
-    peer.on('connection', (conn) => this.acceptConnection(conn));
-    // Mất kết nối tới máy chủ bắt tay không làm rớt người đã vào; nối lại để người mới vào được.
-    peer.on('disconnected', () => {
-      if (this.peer === peer && !peer.destroyed) peer.reconnect();
-    });
-    peer.on('error', (err) => this.emit('notice', describePeerError(err)));
+    if (peer) {
+      peer.on('connection', (conn) => this.acceptConnection(conn));
+      // Mất kết nối tới máy chủ bắt tay không làm rớt người đã vào; nối lại để người mới vào được.
+      peer.on('disconnected', () => {
+        if (this.peer === peer && !peer.destroyed) peer.reconnect();
+      });
+      peer.on('error', (err) => this.emit('notice', describePeerError(err)));
+    }
     this.startHeartbeat();
     this.emitLobby();
     return code;
@@ -175,13 +208,34 @@ export class OnlineSession extends Emitter {
     if (this.conns.has(conn.peer)) return;
     if (msg.protocol !== NET.protocol) return refuse('Phiên bản game khác với chủ phòng — hãy tải lại trang (Ctrl+F5).');
     if (this.lobby.inGame) return refuse('Phòng đang trong trận đấu — hãy chờ trận sau.');
-    const seat = this.freeSeats()[0];
+
+    // Cùng một người tới bằng cả P2P (muộn) lẫn chuyển tiếp ⇒ giữ kết nối mới nhất, đúng chỗ ngồi cũ.
+    const clientId = typeof msg.clientId === 'string' ? msg.clientId.slice(0, 40) : '';
+    const previous = clientId ? this.lobby.members.find((m) => this.clientIds.get(m.id) === clientId) : null;
+    if (previous) this.detachMember(previous.id);
+
+    const seat = previous && this.freeSeats().includes(previous.seat) ? previous.seat : this.freeSeats()[0];
     if (!seat) return refuse('Phòng đã đủ người.');
     const name = cleanName(msg.name, `Người chơi ${this.lobby.members.length + 1}`);
-    this.lobby.members.push({ id: conn.peer, name, seat });
-    this.notify(`${name} đã vào phòng.`); // gửi trước khi thêm kết nối ⇒ người mới không nhận
+    this.lobby.members.push({ id: conn.peer, name, seat, via: conn.relay ? 'relay' : 'p2p' });
+    this.clientIds.set(conn.peer, clientId);
+    if (!previous) this.notify(`${name} đã vào phòng.`); // gửi trước khi thêm kết nối ⇒ người mới không nhận
     this.conns.set(conn.peer, { conn, lastSeen: Date.now() });
     this.emitLobby();
+  }
+
+  /** Gỡ một thành viên mà không thông báo (dùng khi họ vào lại bằng kết nối khác). */
+  detachMember(id) {
+    const entry = this.conns.get(id);
+    this.conns.delete(id);
+    this.clientIds.delete(id);
+    const idx = this.lobby.members.findIndex((m) => m.id === id);
+    if (idx >= 0) this.lobby.members.splice(idx, 1);
+    try {
+      entry?.conn.close();
+    } catch {
+      /* đã đóng */
+    }
   }
 
   moveSeat(id, seat) {
@@ -273,6 +327,7 @@ export class OnlineSession extends Emitter {
     const entry = this.conns.get(id);
     if (!entry) return;
     this.conns.delete(id);
+    this.clientIds.delete(id);
     try {
       entry.conn.close();
     } catch {
@@ -321,52 +376,108 @@ export class OnlineSession extends Emitter {
 
   /* ═══════════════════════════════ KHÁCH ═══════════════════════════════ */
 
-  async join(code, name) {
-    await loadPeerJs();
-    let peer;
-    try {
-      peer = await createPeer();
-    } catch (err) {
-      throw new Error(describePeerError(err));
-    }
+  /**
+   * Vào phòng: thử P2P trước (nhanh, trực tiếp); nếu sau NET.p2pTimeout không thông (NAT/tường lửa)
+   * thì tự chuyển sang kênh chuyển tiếp — kênh này được khởi động song song nên chuyển gần như ngay.
+   * `onStatus(text)` báo tiến trình cho giao diện.
+   */
+  async join(code, name, { onStatus } = {}) {
     this.role = 'guest';
-    this.peer = peer;
     this.code = code;
+    const hello = { type: 'hello', name, protocol: NET.protocol, clientId: randomId() };
+    const relay = new RelayLink(code, `r-${randomId()}`);
+    const relayStarted = relay.start().then(() => true, () => false);
+    let p2pError = null;
 
-    await new Promise((resolve, reject) => {
+    if (!relayForced()) {
+      onStatus?.('Đang kết nối trực tiếp (P2P)…');
+      try {
+        await this.joinP2P(code, hello);
+        relay.close();
+        return;
+      } catch (err) {
+        if (err.refused || !this.active) {
+          relay.close();
+          this.leave({ silent: true });
+          throw err;
+        }
+        p2pError = err;
+      }
+    }
+
+    onStatus?.('Mạng chặn kết nối trực tiếp — đang chuyển sang kênh chuyển tiếp…');
+    // Máy chủ bắt tay báo "không có phòng này" ⇒ gần như chắc chắn sai mã: chỉ thử chuyển tiếp ngắn.
+    const relayTimeout = p2pError?.type === 'peer-unavailable' ? 4_000 : NET.relayTimeout;
+    try {
+      if (!(await relayStarted)) throw new Error('relay-unavailable');
+      await this.handshake(relay, hello, relayTimeout);
+    } catch (err) {
+      relay.close();
+      this.leave({ silent: true });
+      if (err.refused) throw err;
+      if (p2pError?.type === 'peer-unavailable') throw new Error('Không tìm thấy phòng — kiểm tra lại mã phòng.');
+      throw new Error('Không kết nối được tới phòng: cả kết nối trực tiếp lẫn kênh chuyển tiếp đều không thông. '
+        + 'Kiểm tra lại mã phòng, hoặc thử mạng khác (Wi-Fi ↔ 4G).');
+    }
+  }
+
+  async joinP2P(code, hello) {
+    await loadPeerJs();
+    const peer = await createPeer();
+    this.peer = peer;
+    try {
+      const conn = peer.connect(peerIdFor(code), { reliable: true, serialization: 'json' });
+      await this.handshake(conn, hello, NET.p2pTimeout, peer);
+    } catch (err) {
+      this.peer = null;
+      peer.destroy();
+      throw err;
+    }
+  }
+
+  /** Gửi lời chào qua `conn` rồi chờ chủ phòng nhận vào phòng ('lobby') hoặc từ chối ('refused'). */
+  handshake(conn, hello, timeoutMs, peer = null) {
+    return new Promise((resolve, reject) => {
       let settled = false;
-      const fail = (text) => {
+      const finish = (err) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        this.leave({ silent: true });
-        reject(new Error(text));
+        if (err) reject(err);
+        else resolve();
       };
-      const timer = setTimeout(
-        () => fail('Không kết nối được tới phòng (hết thời gian chờ). Mạng có thể đang chặn kết nối trực tiếp.'),
-        NET.connectTimeout + 3000,
-      );
-      peer.on('error', (err) => (settled ? this.emit('notice', describePeerError(err)) : fail(describePeerError(err))));
+      const fail = (text, extra = {}) => finish(Object.assign(new Error(text), extra));
+      const timer = setTimeout(() => fail('Hết thời gian chờ.', { timeout: true }), timeoutMs);
 
-      const conn = peer.connect(peerIdFor(code), { reliable: true, serialization: 'json' });
-      this.hostConn = conn;
-      conn.on('open', () => conn.send({ type: 'hello', name, protocol: NET.protocol }));
+      peer?.on('error', (err) => {
+        if (!settled) fail(describePeerError(err), { type: err.type });
+        else if (this.hostConn === conn) this.emit('notice', describePeerError(err));
+      });
+      if (conn.relay) conn.send(hello);
+      else conn.on('open', () => conn.send(hello));
+
       conn.on('data', (msg) => {
         if (!msg || typeof msg !== 'object') return;
-        this.lastHostSeen = Date.now();
         if (!settled) {
-          if (msg.type === 'refused') return fail(msg.text);
-          if (msg.type === 'lobby') {
-            settled = true;
-            clearTimeout(timer);
-            this.startHeartbeat();
-            resolve();
-          }
+          if (msg.type === 'refused') return fail(msg.text, { refused: true });
+          if (msg.type !== 'lobby') return;
+          // Xác định danh tính + kiểu kết nối TRƯỚC khi xử lý 'lobby' (sảnh vẽ ngay khi nhận).
+          this.hostConn = conn;
+          this.selfId = conn.relay ? conn.id : peer.id;
+          this.transport = conn.relay ? 'relay' : 'p2p';
+          finish();
+          this.startHeartbeat();
+        } else if (this.hostConn !== conn) {
+          return; // kênh đã bị bỏ (vd. P2P trả lời quá muộn)
         }
+        this.lastHostSeen = Date.now();
         this.inbox.push(msg);
         this.pump();
       });
-      const closed = () => (settled ? this.lost('Mất kết nối với chủ phòng.') : fail('Chủ phòng đã đóng kết nối.'));
+      const closed = () => {
+        if (!settled) fail('Kết nối bị đóng.', { closed: true });
+        else if (this.hostConn === conn) this.lost('Mất kết nối với chủ phòng.');
+      };
       conn.on('close', closed);
       conn.on('error', closed);
     });
@@ -505,8 +616,13 @@ export class OnlineSession extends Emitter {
     } catch {
       /* bỏ qua */
     }
-    const { peer } = this;
-    setTimeout(() => peer?.destroy(), 200); // chờ tin nhắn cuối được gửi đi
+    const { peer, relay, hostConn } = this;
+    setTimeout(() => {
+      // chờ tin nhắn cuối được gửi đi rồi mới đóng
+      peer?.destroy();
+      relay?.stop();
+      hostConn?.close?.();
+    }, 200);
     this.reset();
     this.game.resetNetwork();
     if (!silent) this.emit('left');
