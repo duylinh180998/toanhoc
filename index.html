@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MathGraph Arena</title>
+  <meta name="description" content="Game đối kháng 2D theo lượt — ngắm bắn bằng đồ thị hàm số f(x) trên hệ trục Oxy, địa hình phá huỷ được.">
+  <meta name="theme-color" content="#070a16">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338d8ff'/%3E%3Cstop offset='1' stop-color='%23ff4fa3'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='%230c1124'/%3E%3Cpath d='M10 48 C 22 8, 38 8, 54 36' stroke='url(%23g)' stroke-width='6' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='54' cy='36' r='5' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css?v=7eab9c2">
+  <!-- math.js: parse & tính biểu thức an toàn. Nếu CDN này lỗi, js/main.js tự thử CDN dự phòng. -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjs@13.2.0/lib/browser/math.js"></script>
+  <script type="module" src="js/main.js?v=7eab9c2"></script>
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- ═════════════════════ THANH TRÊN ═════════════════════ -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#38d8ff" /><stop offset="1" stop-color="#ff4fa3" />
+            </linearGradient>
+          </defs>
+          <rect width="64" height="64" rx="16" fill="#111833" />
+          <path d="M12 50 L12 14 M12 50 L52 50" stroke="#3b4680" stroke-width="3" stroke-linecap="round" />
+          <path d="M14 46 C 24 10, 38 10, 52 34" stroke="url(#logoGrad)" stroke-width="5.5" fill="none" stroke-linecap="round" />
+          <circle cx="52" cy="34" r="4.5" fill="#fff" />
+        </svg>
+        <div class="brand-text">MathGraph <span>Arena</span></div>
+      </div>
+
+      <div class="scoreboard" id="scoreboard" aria-label="Bảng đội"></div>
+
+      <div class="topbar-actions">
+        <div class="net-badge" id="netBadge" hidden title="Đang chơi online (P2P)">
+          <i aria-hidden="true"></i><span id="netBadgeText">Online</span>
+        </div>
+        <button class="icon-btn" id="helpBtn" type="button" aria-label="Cách chơi" data-tip="Cách chơi">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.6" /><circle cx="12" cy="17" r=".6" fill="currentColor" /></svg>
+        </button>
+        <button class="icon-btn" id="soundBtn" type="button" aria-label="Bật/tắt âm thanh" data-tip="Âm thanh">
+          <svg class="ico-sound-on" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" /><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" /></svg>
+          <svg class="ico-sound-off" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" /><path d="M16 9.5l5 5M21 9.5l-5 5" /></svg>
+        </button>
+        <button class="icon-btn" id="menuBtn" type="button" aria-label="Về menu" data-tip="Menu">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ═════════════════════ SÂN ĐẤU ═════════════════════ -->
+    <main class="stage">
+      <div class="arena" id="arena">
+        <canvas id="game" width="1000" height="600" aria-label="Sân đấu MathGraph Arena"></canvas>
+        <div class="turn-banner" id="turnBanner" aria-live="polite">
+          <span class="turn-banner-label">Lượt của</span>
+          <strong class="turn-banner-name" id="turnBannerName"></strong>
+          <span class="turn-banner-team" id="turnBannerTeam"></span>
+        </div>
+        <div class="toasts" id="toasts" aria-live="polite"></div>
+      </div>
+
+      <!-- ═════════════════════ BẢNG ĐIỀU KHIỂN ═════════════════════ -->
+      <section class="panel" id="panel" aria-label="Bảng điều khiển">
+        <div class="panel-player">
+          <div class="pp-head">
+            <div class="avatar" id="ppAvatar"></div>
+            <div class="pp-id">
+              <div class="pp-name" id="ppName">—</div>
+              <div class="pp-team" id="ppTeam">—</div>
+            </div>
+            <div class="timer" id="timer" aria-label="Thời gian còn lại">
+              <svg viewBox="0 0 48 48">
+                <circle class="timer-track" cx="24" cy="24" r="20" />
+                <circle class="timer-ring" id="timerRing" cx="24" cy="24" r="20" />
+              </svg>
+              <span id="timerText">30</span>
+            </div>
+          </div>
+          <div class="pp-hp">
+            <div class="hpbar"><div class="hpbar-lag" id="ppHpLag"></div><div class="hpbar-fill" id="ppHpFill"></div></div>
+            <span class="pp-hp-text" id="ppHpText">100</span>
+          </div>
+          <div class="pp-badges" id="ppBadges"></div>
+        </div>
+
+        <div class="panel-formula">
+          <label class="formula-field" id="formulaField">
+            <span class="fx">f(x) =</span>
+            <input id="formula" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+              placeholder="vd: -0.05*x^2 + 2*x" aria-describedby="formulaMsg">
+            <span class="formula-state" id="formulaState" aria-hidden="true"></span>
+          </label>
+          <div class="formula-msg" id="formulaMsg">Đồ thị xuất phát tại nhân vật: Y = y₀ + f(x − x₀) − f(0)</div>
+          <div class="chips">
+            <div class="chip-row" id="quickChips" aria-label="Chèn nhanh"></div>
+            <div class="chip-row history" id="historyChips" aria-label="Công thức đã bắn"></div>
+          </div>
+        </div>
+
+        <div class="panel-actions">
+          <div class="spells" id="spells"></div>
+          <div class="action-row">
+            <div class="dir-toggle" role="group" aria-label="Hướng bắn">
+              <button type="button" data-dir="-1" aria-label="Bắn sang trái">
+                <svg viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6" /></svg><span>Trái</span>
+              </button>
+              <button type="button" data-dir="1" aria-label="Bắn sang phải">
+                <span>Phải</span><svg viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6" /></svg>
+              </button>
+            </div>
+            <button type="button" class="fire-btn" id="fireBtn">
+              <span class="fire-main" id="fireLabel">BẮN</span>
+              <span class="fire-sub">Vẽ đồ thị · <kbd>Enter</kbd></span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ═════════════════════ MENU BẮT ĐẦU ═════════════════════ -->
+    <div class="screen" id="menuScreen">
+      <div class="menu-card">
+        <span class="build-tag" id="buildTag" title="Phiên bản đang chạy — bạn bè nên cùng phiên bản"></span>
+        <svg class="menu-curves" viewBox="0 0 760 120" preserveAspectRatio="none" aria-hidden="true">
+          <path class="c1" d="M0 90 C 120 -10, 240 -10, 380 60 S 640 130, 760 20" />
+          <path class="c2" d="M0 60 Q 95 120 190 60 T 380 60 T 570 60 T 760 60" />
+          <path class="c3" d="M0 110 C 200 110, 300 100, 420 70 S 620 0, 760 4" />
+        </svg>
+        <h1 class="menu-title">MathGraph <span>Arena</span></h1>
+        <p class="menu-tagline">Đấu trường đồ thị hàm số — ngắm bắn bằng toán học.</p>
+
+        <div class="menu-tabs" role="tablist" aria-label="Kiểu chơi">
+          <button type="button" role="tab" data-tab="local" aria-controls="paneLocal">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>Cùng máy
+          </button>
+          <button type="button" role="tab" data-tab="online" aria-controls="paneOnline">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z" /></svg>Online <span class="tab-badge">P2P</span>
+          </button>
+        </div>
+
+        <div class="mode-select" role="radiogroup" aria-label="Chế độ chơi">
+          <button type="button" class="mode-card" data-mode="1v1" role="radio">
+            <span class="mode-dots"><i class="a"></i><b>vs</b><i class="b"></i></span>
+            <span class="mode-name">1 vs 1</span>
+            <span class="mode-desc">Đấu tay đôi · 2 người</span>
+          </button>
+          <button type="button" class="mode-card" data-mode="2v2" role="radio">
+            <span class="mode-dots"><i class="a"></i><i class="a"></i><b>vs</b><i class="b"></i><i class="b"></i></span>
+            <span class="mode-name">2 vs 2</span>
+            <span class="mode-desc">Đồng đội · 4 người · có bắn nhầm đồng đội</span>
+          </button>
+        </div>
+
+        <div class="menu-pane" id="paneLocal" data-pane="local" role="tabpanel">
+        <div class="roster" id="roster"></div>
+
+        <div class="menu-options">
+          <div class="opt">
+            <span class="opt-label">Bản đồ</span>
+            <button type="button" class="opt-btn" id="seedBtn" data-tip="Tạo bản đồ khác">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4" /><circle cx="9" cy="9" r="1.2" fill="currentColor" /><circle cx="15" cy="15" r="1.2" fill="currentColor" /><circle cx="15" cy="9" r="1.2" fill="currentColor" /><circle cx="9" cy="15" r="1.2" fill="currentColor" /></svg>
+              <span id="seedText">#000000</span>
+            </button>
+          </div>
+          <div class="opt">
+            <span class="opt-label">Thời gian lượt</span>
+            <div class="seg" id="timeSeg" role="radiogroup" aria-label="Thời gian lượt">
+              <button type="button" data-time="20">20s</button>
+              <button type="button" data-time="30">30s</button>
+              <button type="button" data-time="45">45s</button>
+              <button type="button" data-time="60">60s</button>
+            </div>
+          </div>
+          <label class="opt switch">
+            <span class="opt-label">Sát thương đồng đội</span>
+            <input type="checkbox" id="ffToggle" checked>
+            <span class="switch-ui" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="menu-actions">
+          <button type="button" class="btn ghost" id="menuHelpBtn">Cách chơi</button>
+          <button type="button" class="btn primary" id="startBtn">Vào trận
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+        <p class="menu-foot">Mẹo: rê chuột trên sân để đo Δx, Δy từ nhân vật tới mục tiêu.</p>
+        </div>
+
+        <div class="menu-pane" id="paneOnline" data-pane="online" role="tabpanel" hidden>
+          <label class="name-field">
+            <span>Tên của bạn</span>
+            <input id="onlineName" maxlength="14" autocomplete="nickname" spellcheck="false" placeholder="vd: Linh">
+          </label>
+          <div class="online-grid">
+            <section class="online-card">
+              <h3>Tạo phòng mới</h3>
+              <p>Bạn làm chủ phòng với chế độ đang chọn ở trên, rồi gửi link mời cho bạn bè.</p>
+              <button type="button" class="btn primary" id="hostBtn">Tạo phòng
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+            </section>
+            <section class="online-card">
+              <h3>Vào phòng</h3>
+              <input id="joinCode" class="code-input" maxlength="6" placeholder="MÃ PHÒNG" autocomplete="off"
+                spellcheck="false" autocapitalize="characters" aria-label="Mã phòng">
+              <button type="button" class="btn ghost" id="joinBtn">Vào phòng
+                <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              </button>
+            </section>
+          </div>
+          <p class="online-status" id="onlineStatus" role="status" aria-live="polite"></p>
+          <div class="menu-actions online-actions">
+            <p class="menu-foot">Kết nối trực tiếp giữa các trình duyệt (WebRTC) — không cần tài khoản, không lưu dữ liệu.</p>
+            <button type="button" class="btn ghost" id="onlineHelpBtn">Cách chơi</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════════════════ SẢNH CHỜ ONLINE ═════════════════════ -->
+    <div class="screen" id="lobbyScreen" hidden>
+      <div class="menu-card lobby-card">
+        <div class="lobby-head">
+          <div>
+            <span class="eyebrow">Phòng online · <span id="lobbyRole">Chủ phòng</span></span>
+            <h2 class="lobby-code" id="lobbyCode">------</h2>
+          </div>
+          <div class="lobby-share">
+            <button type="button" class="btn ghost small" id="copyLinkBtn">
+              <svg viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1" /><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" /></svg>
+              <span id="copyLinkLabel">Sao chép link mời</span>
+            </button>
+            <button type="button" class="btn ghost small" id="copyCodeBtn" aria-label="Sao chép mã phòng">
+              <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
+              Mã
+            </button>
+          </div>
+        </div>
+        <div class="invite-link" id="inviteLink"></div>
+
+        <div class="lobby-settings">
+          <div class="seg" id="lobbyMode" role="radiogroup" aria-label="Chế độ">
+            <button type="button" data-mode="1v1">1 vs 1</button>
+            <button type="button" data-mode="2v2">2 vs 2</button>
+          </div>
+          <div class="seg" id="lobbyTime" role="radiogroup" aria-label="Thời gian lượt">
+            <button type="button" data-time="20">20s</button>
+            <button type="button" data-time="30">30s</button>
+            <button type="button" data-time="45">45s</button>
+            <button type="button" data-time="60">60s</button>
+          </div>
+          <label class="opt switch">
+            <span class="opt-label">Sát thương đồng đội</span>
+            <input type="checkbox" id="lobbyFF">
+            <span class="switch-ui" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="seats" id="seats"></div>
+        <ul class="lobby-feed" id="lobbyFeed" aria-live="polite"></ul>
+        <p class="lobby-status" id="lobbyStatus" role="status"></p>
+
+        <div class="menu-actions">
+          <button type="button" class="btn ghost" id="leaveLobbyBtn">Rời phòng</button>
+          <button type="button" class="btn primary" id="lobbyStartBtn">Bắt đầu trận
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════════════════ KẾT THÚC TRẬN ═════════════════════ -->
+    <div class="screen" id="overScreen" hidden>
+      <div class="menu-card over-card">
+        <div class="trophy" id="overTrophy" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4v3h-4z" /></svg>
+        </div>
+        <h2 class="over-title" id="overTitle">Đội Lam chiến thắng!</h2>
+        <p class="over-sub" id="overSub"></p>
+        <table class="stats">
+          <thead><tr><th>Người chơi</th><th>HP</th><th>Bắn</th><th>Trúng</th><th>Sát thương</th><th>Bắn nhầm</th></tr></thead>
+          <tbody id="statsBody"></tbody>
+        </table>
+        <p class="over-wait" id="overWait" hidden>Đang chờ chủ phòng chọn tái đấu…</p>
+        <div class="menu-actions">
+          <button type="button" class="btn ghost" id="toMenuBtn">Về menu</button>
+          <button type="button" class="btn primary" id="rematchBtn">Tái đấu (bản đồ mới)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════════════════ HƯỚNG DẪN ═════════════════════ -->
+    <div class="modal" id="helpModal" hidden role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="modal-card help-card">
+        <button type="button" class="icon-btn modal-close" data-close aria-label="Đóng">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+        <h2 id="helpTitle">Cách chơi</h2>
+        <div class="help-grid">
+          <section>
+            <h3>Mục tiêu</h3>
+            <p>Hạ gục toàn bộ đội đối thủ. Mỗi nhân vật có <b>100 HP</b>; trúng tia đồ thị hoặc nằm trong bán kính nổ mất <b>25 HP</b>. Rơi khỏi bản đồ = bị loại.</p>
+            <h3>Ngắm bắn bằng hàm số</h3>
+            <p>Nhập <code>f(x)</code> rồi bấm <b>BẮN</b>. Đồ thị luôn xuất phát từ nhân vật nhờ phép tịnh tiến:</p>
+            <p class="formula-big">Y(x) = y₀ + f(x − x₀) − f(0)</p>
+            <p>Bắn sang <b>phải</b>: x chạy về phía dương. Bắn sang <b>trái</b>: x chạy về phía âm — vì vậy <code>-0.5*x</code> đi <i>lên</i> khi bắn trái. Trục nét đứt quanh nhân vật chính là hệ trục của f.</p>
+            <p>Tia dừng khi chạm đất, chạm người, ra khỏi bản đồ, gặp tiệm cận đứng hoặc ra ngoài miền xác định (vd. <code>sqrt(x)</code> khi bắn trái).</p>
+          </section>
+          <section>
+            <h3>Ví dụ</h3>
+            <ul class="examples">
+              <li><code>0.5*x</code> — đường thẳng dốc lên</li>
+              <li><code>-0.05*x^2 + 2*x</code> — parabol cầu vồng</li>
+              <li><code>3*sin(x/2)</code> — lượn sóng qua chướng ngại</li>
+              <li><code>x^3/400</code> — thoải rồi dốc đứng</li>
+              <li><code>-8/(1+exp(-(x-12)))</code> — bậc thang mềm (sigmoid)</li>
+              <li><code>x &lt; 10 ? 0.8*x : 8 - 2*(x-10)</code> — hàm từng khúc</li>
+            </ul>
+            <p class="muted">Hỗ trợ: + − * / ^, sin, cos, tan, sqrt, abs, log (ln), exp, pi, e, min, max, floor… Có thể viết tắt <code>2x</code>, <code>3sin(x)</code>.</p>
+            <h3>Phép trợ giúp (1 phép / lượt)</h3>
+            <ul class="spell-help" id="spellHelp"></ul>
+            <h3>Phím tắt</h3>
+            <p class="muted"><kbd>Enter</kbd> bắn · <kbd>Esc</kbd> thoát ô nhập · ngoài ô nhập: <kbd>←</kbd>/<kbd>→</kbd> đổi hướng, <kbd>1</kbd>–<kbd>4</kbd> chọn phép, <kbd>F</kbd> gõ công thức.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════════════════ XÁC NHẬN THOÁT ═════════════════════ -->
+    <div class="modal" id="confirmModal" hidden role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="modal-card confirm-card">
+        <h2 id="confirmTitle">Tạm dừng</h2>
+        <p id="confirmText">Trận đấu đang tạm dừng. Thoát về menu sẽ huỷ trận hiện tại.</p>
+        <div class="menu-actions">
+          <button type="button" class="btn ghost" id="quitBtn">Thoát về menu</button>
+          <button type="button" class="btn primary" id="resumeBtn">Tiếp tục</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="boot-error" id="bootError" hidden>
+      <h2>Không tải được math.js</h2>
+      <p>Game cần thư viện math.js từ CDN. Hãy kiểm tra kết nối Internet rồi tải lại trang.</p>
+    </div>
+  </div>
+</body>
+</html>
