@@ -27,6 +27,7 @@ Hoặc bất kỳ static server nào: `python3 -m http.server 5173`, `npx serve 
 | Cách | Làm gì |
 | --- | --- |
 | **GitHub Pages** (đang dùng) | Pages phục vụ từ nhánh **`gh-pages`**, nhánh này chỉ chứa bản build (*Settings → Pages → Deploy from a branch → gh-pages / root*). Mỗi lần push lên `main`, workflow `.github/workflows/deploy.yml` chạy test, build rồi ghi đè bản mới lên `gh-pages`. Khoảng 1 phút sau trang tự cập nhật. Repo khác: GitHub tự bật Pages ngay lần đầu có nhánh `gh-pages`, nếu không thì chọn như trên. Game ở `https://<user>.github.io/<repo>/`. |
+| *Phiên bản* | Góc trên menu hiện mã phiên bản (`v` + mã commit) để so xem mọi người có cùng bản không. Mỗi lần deploy, đường dẫn JS/CSS được gắn `?v=<mã commit>`, nhờ đó trình duyệt không trộn file cũ với file mới. GitHub Pages cho trình duyệt giữ trang tới ~10 phút: thấy bản cũ thì nhấn **Ctrl+F5**. |
 | **Netlify / Vercel / Cloudflare Pages** | Kéo-thả cả thư mục, hoặc kết nối repo với *build command* để trống, *publish directory* là `.` (thư mục gốc). |
 | **Một file HTML duy nhất** | `npm install && npm run build` → `dist/mathgraph-arena.html` (~890 KB, đã nhúng math.js). Chơi chung máy offline 100%, mở bằng double-click; chơi online thì cần Internet (tải PeerJS từ CDN). |
 

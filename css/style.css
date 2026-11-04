@@ -2262,3 +2262,17 @@ code {
   background: rgba(251, 191, 36, 0.1);
   border-color: rgba(251, 191, 36, 0.32);
 }
+
+.build-tag {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  z-index: 1;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+  background: rgba(4, 7, 20, 0.55);
+  border: 1px solid var(--border);
+}

@@ -28,6 +28,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+
+      - name: Gắn mã phiên bản (hiện ở góc menu)
+        run: |
+          sed -i "s/^export const BUILD = 'dev';/export const BUILD = '${GITHUB_SHA::7}';/" js/config.js
+          grep -q "BUILD = '${GITHUB_SHA::7}'" js/config.js
+
       - run: npm run build
 
       - name: Chuẩn bị thư mục site
@@ -36,6 +42,14 @@ jobs:
           cp -r index.html css js _site/
           cp dist/mathgraph-arena.html _site/
           touch _site/.nojekyll
+          # Chống trình duyệt dùng lẫn file cũ/mới (GitHub Pages cho cache 10 phút):
+          # mọi đường dẫn CSS/JS của bản deploy đều gắn ?v=<mã commit> ⇒ mỗi bản có URL riêng.
+          V="${GITHUB_SHA::7}"
+          sed -i -e "s#href=\"css/style.css\"#href=\"css/style.css?v=$V\"#" \
+                 -e "s#src=\"js/main.js\"#src=\"js/main.js?v=$V\"#" _site/index.html
+          find _site/js -name '*.js' -exec sed -i -E "s#(from ')(\.{1,2}/[^']+\.js)(')#\1\2?v=$V\3#g" {} +
+          grep -q "js/main.js?v=$V" _site/index.html
+          ! grep -rhoE "from '\.{1,2}/[^']+\.js'" _site/js # không còn import nào thiếu ?v=
 
       - name: Đẩy lên nhánh gh-pages
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

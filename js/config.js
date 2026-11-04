@@ -94,6 +94,9 @@ export const NET = Object.freeze({
   relayTopic: 'mathgraph-arena', // tiền tố topic MQTT
 });
 
+/** Mã phiên bản — workflow deploy thay 'dev' bằng mã commit (hiện ở góc menu để so phiên bản). */
+export const BUILD = 'dev';
+
 /** Số đồ thị cũ được giữ lại dạng nét mờ để căn chỉnh. */
 export const TRAIL_COUNT = 3;
 

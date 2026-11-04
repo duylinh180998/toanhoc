@@ -1,5 +1,5 @@
 /** Các màn hình phủ: menu bắt đầu (tab Cùng máy / Online), kết thúc trận, hướng dẫn, tạm dừng. */
-import { DEFAULT_NAMES, PLAYER, SPELLS, TEAMS, TURN } from '../config.js';
+import { BUILD, DEFAULT_NAMES, PLAYER, SPELLS, TEAMS, TURN } from '../config.js';
 import { randomSeed, storage } from '../utils.js';
 import { LobbyUI } from './lobby.js';
 
@@ -35,6 +35,7 @@ export class Screens {
     };
 
     this.lobbyUI = new LobbyUI({ game, sfx, session, screens: this });
+    $('buildTag').textContent = `v${BUILD}`;
     this.tab = this.lobbyUI.invited ? 'online' : storage.get('mga.tab', 'local');
 
     this.bindMenu();
