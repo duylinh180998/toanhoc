@@ -3,6 +3,7 @@
 Game đối kháng 2D theo lượt: **ngắm bắn bằng đồ thị hàm số**. Thay vì chỉnh góc và lực, bạn nhập `f(x)` — tia đạn chính là đồ thị của hàm số, vẽ dần từ vị trí nhân vật trên hệ trục Oxy, phá huỷ địa hình khi va chạm.
 
 - **1v1** hoặc **2v2** (có sát thương đồng đội), lượt luân phiên A1 → B1 → A2 → B2, 30 giây/lượt.
+- **Chơi chung 1 máy** hoặc **online qua link mời** (P2P WebRTC) — không cần server riêng, không cần database.
 - **Địa hình phá huỷ được** (offscreen canvas + `destination-out`), nhân vật rơi theo trọng lực, rơi khỏi bản đồ là bị loại.
 - **4 phép trợ giúp**: Dịch chuyển, Hồi máu (+30), Khiên (chặn 1 lần sát thương), x2 Sát thương (50 HP, nổ 50px).
 - Lưới toạ độ, trục tương đối quanh nhân vật, thước đo Δx/Δy theo con trỏ, giữ 3 đồ thị gần nhất dạng nét mờ.
@@ -25,7 +26,38 @@ Hoặc bất kỳ static server nào: `python3 -m http.server 5173`, `npx serve 
 | --- | --- |
 | **GitHub Pages** (tự động) | Vào *Settings → Pages → Build and deployment → Source* chọn **GitHub Actions** (làm 1 lần). Mỗi lần push lên `main`, workflow `.github/workflows/deploy.yml` sẽ chạy test, build và deploy. Game ở `https://<user>.github.io/<repo>/`, bản 1 file ở `…/mathgraph-arena.html`. |
 | **Netlify / Vercel / Cloudflare Pages** | Kéo-thả cả thư mục, hoặc kết nối repo với *build command* để trống, *publish directory* là `.` (thư mục gốc). |
-| **Một file HTML duy nhất** | `npm install && npm run build` → `dist/mathgraph-arena.html` (~820 KB, đã nhúng math.js). Chạy offline 100%, gửi cho ai cũng mở được bằng double-click. |
+| **Một file HTML duy nhất** | `npm install && npm run build` → `dist/mathgraph-arena.html` (~890 KB, đã nhúng math.js). Chơi chung máy offline 100%, mở bằng double-click; chơi online thì cần Internet (tải PeerJS từ CDN). |
+
+## Chơi online (P2P, không cần database)
+
+1. Menu → tab **Online** → nhập tên → chọn 1v1/2v2 → **Tạo phòng**.
+2. Gửi **link mời** (hoặc mã 6 ký tự) cho bạn bè. Họ mở link, nhập tên, bấm **Vào phòng**.
+3. Trong sảnh, mọi người có thể bấm vào ghế trống để đổi chỗ. Chủ phòng chọn chế độ, thời gian lượt, sát thương đồng đội rồi bấm **Bắt đầu trận**.
+4. 2v2 không cần đủ 4 người: ghế trống do đồng đội cùng đội điều khiển thay (vd. 2 người, mỗi người điều khiển 2 nhân vật).
+
+**Cách hoạt động.** Các trình duyệt nối trực tiếp với nhau bằng WebRTC qua thư viện [PeerJS](https://peerjs.com/). Máy chủ PeerJS công cộng (miễn phí) chỉ giúp hai bên tìm thấy nhau lúc bắt tay. Dữ liệu trận đấu không đi qua đó, và không có gì được lưu lại. Trạng thái phòng nằm trong bộ nhớ trình duyệt của **chủ phòng**:
+
+- Mọi người kết nối tới chủ phòng (hình sao). Chủ phòng kiểm tra từng hành động (đổi hướng, phép, bắn) rồi phát lại cho cả phòng.
+- Vì cùng seed bản đồ và cùng hành động, mỗi máy tự mô phỏng ra cùng một phát bắn. Mỗi lượt chỉ tốn vài chục byte.
+- Đầu mỗi lượt chủ phòng gửi một bản chốt trạng thái (vị trí, máu, phép, danh sách hố) để sửa mọi sai lệch nhỏ. Dữ liệu va chạm địa hình được tính thuần toán học (`js/core/mask.js`), không đọc pixel canvas, nên mọi máy cho kết quả giống hệt nhau.
+- Chỉ chủ phòng quyết định chuyển lượt, hết giờ (có cộng 0.6 giây bù độ trễ mạng) và thắng/thua.
+- Có người rời phòng: đồng đội điều khiển thay. Một đội không còn ai thì đội đó thua. Chủ phòng rời thì phòng đóng.
+
+**Test online ngay trên 1 máy:** chạy `npm start`, mở `http://localhost:5173` ở **2 tab** (hoặc 1 tab thường + 1 tab ẩn danh), tab này tạo phòng, tab kia vào phòng. Muốn thử bằng điện thoại cùng mạng Wi-Fi thì mở `http://<IP-máy-tính>:5173`.
+
+**Tự host máy chủ bắt tay** (khi máy chủ công cộng chậm/hỏng, hoặc mạng chặn nó):
+
+```bash
+npx peerjs --port 9000          # chạy PeerServer
+# rồi mở game với: http://localhost:5173/?peer=http://localhost:9000/
+```
+
+Hoặc đặt `NET.server` trong `js/config.js` thành địa chỉ server của bạn (vd. `'https://peer.ten-mien.com/'`).
+
+**Giới hạn cần biết**
+- Chủ phòng phải giữ tab mở suốt trận. Tab bị ẩn vẫn chạy nhưng trình duyệt có thể làm chậm.
+- Một số mạng công ty, trường học hoặc 4G chặn kết nối trực tiếp. PeerJS đã kèm sẵn máy chủ TURN công cộng để chuyển tiếp, nhưng không đảm bảo luôn thành công.
+- Rớt mạng giữa trận thì không vào lại được trận đó, phải chờ trận sau.
 
 ## Cách chơi
 
@@ -57,20 +89,24 @@ js/
   math/formula.js     parse + whitelist AST + biên dịch f(x) bằng math.js, chuẩn hoá cách gõ, điểm neo f(0)
   core/coords.js      đổi toạ độ màn hình ↔ hệ trục Oxy (1 đơn vị = 20px, x ∈ [−25, 25], y ∈ [−15, 15])
   core/tracer.js      ★ thuật toán truy vết đồ thị: bước thích nghi + dò va chạm từng 0.5px
-  core/terrain.js     sinh bản đồ theo seed, mask va chạm, khoét hố destination-out
+  core/terrain.js     sinh bản đồ theo seed, vẽ địa hình, khoét hố destination-out
+  core/mask.js        dữ liệu va chạm thuần toán học (giống hệt nhau trên mọi máy)
   core/player.js      nhân vật, phép trợ giúp, trọng lực
-  core/game.js        máy trạng thái trận đấu: lượt, bắn, nổ, sát thương, thắng/thua
+  core/game.js        máy trạng thái trận đấu: lượt, bắn, nổ, sát thương, thắng/thua, bản chốt online
+  net/peer.js         tải PeerJS, mã phòng, link mời, máy chủ bắt tay tự host
+  net/online.js       phòng online: sảnh, ghế, giao thức tin nhắn, chủ phòng quyết định, heartbeat
   render/renderer.js  vẽ canvas (lưới, trục tương đối, đồ thị phát sáng, nhân vật, công cụ ngắm)
   render/effects.js   hạt, sóng xung kích, chữ bay, rung màn hình
   audio/sfx.js        âm thanh WebAudio tổng hợp
   ui/hud.js           bảng điều khiển, bảng đội, banner, toast, phím tắt
-  ui/screens.js       menu, kết thúc trận, hướng dẫn, tạm dừng
+  ui/screens.js       menu (tab Cùng máy / Online), kết thúc trận, hướng dẫn, tạm dừng
+  ui/lobby.js         tab Online + màn hình sảnh chờ
 tools/serve.mjs       static server không phụ thuộc
 tools/build.mjs       đóng gói thành 1 file HTML
 tests/                kiểm thử tracer + parser (node:test)
 ```
 
-`Game` không chạm vào DOM — UI chỉ lắng nghe sự kiện (`turn`, `update`, `toast`, `over`…) và gọi `fire()`, `castSpell()`, `setFacing()`. Mở console và gõ `mga.game` để debug.
+`Game` không chạm vào DOM. UI chỉ lắng nghe sự kiện (`turn`, `update`, `toast`, `over`…) và gửi thao tác qua `game.request({ kind: 'fire' | 'spell' | 'facing', … })`. Khi chơi online, `request()` chuyển thao tác cho chủ phòng thay vì tự áp dụng. Mở console và gõ `mga.game` hoặc `mga.session` để debug.
 
 ## Thuật toán chống "xuyên địa hình" (sub-stepping)
 
@@ -85,5 +121,5 @@ Phép chia đôi cũng tự phát hiện **điểm gián đoạn**: hàm liên t
 
 ```bash
 npm install
-npm test             # tracer: tường mỏng 1px, tiệm cận, miền xác định, bắn trái/phải… + parser
+npm test             # tracer (tường mỏng 1px, tiệm cận, miền xác định…), parser, mask va chạm tất định
 ```

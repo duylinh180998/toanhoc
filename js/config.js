@@ -47,6 +47,24 @@ export const TURN = Object.freeze({
   resolveMax: 5,       // chặn trên, tránh kẹt lượt nếu có gì đó rơi mãi
 });
 
+/**
+ * Chơi online P2P (WebRTC qua thư viện PeerJS) — không cần server riêng, không cần database.
+ * `server`: null = dùng máy chủ bắt tay (signaling) công cộng miễn phí của PeerJS.
+ *           Có thể tự host bằng `npx peerjs --port 9000` rồi đặt 'https://ten-mien-cua-ban/' hoặc
+ *           thêm tham số ?peer=http://localhost:9000/ vào URL khi test.
+ */
+export const NET = Object.freeze({
+  protocol: 1,                    // tăng khi đổi định dạng tin nhắn ⇒ máy khác phiên bản sẽ bị từ chối
+  peerPrefix: 'mathgraph-arena-', // ID trên máy chủ PeerJS = tiền tố + mã phòng
+  codeAlphabet: 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', // bỏ các ký tự dễ nhầm: I, L, O, 0, 1
+  codeLength: 6,
+  server: null,
+  connectTimeout: 12_000,         // ms
+  heartbeat: 2_000,               // ms giữa 2 lần ping
+  dropAfter: 15_000,              // ms không nhận được gì ⇒ coi như mất kết nối
+  timeoutGrace: 0.6,              // giây chủ phòng chờ thêm sau khi hết giờ (bù độ trễ mạng)
+});
+
 /** Số đồ thị cũ được giữ lại dạng nét mờ để căn chỉnh. */
 export const TRAIL_COUNT = 3;
 

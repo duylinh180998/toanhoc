@@ -486,9 +486,11 @@ export class Renderer {
     ctx.textBaseline = 'alphabetic';
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(5, 8, 22, 0.85)';
-    ctx.strokeText(p.name, x, top - bh - 4);
+    // Online: đánh dấu nhân vật do máy này điều khiển.
+    const label = game.online && game.isLocal(p) ? `${p.name} · bạn` : p.name;
+    ctx.strokeText(label, x, top - bh - 4);
     ctx.fillStyle = isActive ? '#fff' : team.soft;
-    ctx.fillText(p.name, x, top - bh - 4);
+    ctx.fillText(label, x, top - bh - 4);
 
     if (isActive) {
       const ay = top - bh - 22 + Math.sin(t * 5) * 2.5;

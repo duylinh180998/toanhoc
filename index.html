@@ -37,6 +37,9 @@
       <div class="scoreboard" id="scoreboard" aria-label="Bảng đội"></div>
 
       <div class="topbar-actions">
+        <div class="net-badge" id="netBadge" hidden title="Đang chơi online (P2P)">
+          <i aria-hidden="true"></i><span id="netBadgeText">Online</span>
+        </div>
         <button class="icon-btn" id="helpBtn" type="button" aria-label="Cách chơi" data-tip="Cách chơi">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.6" /><circle cx="12" cy="17" r=".6" fill="currentColor" /></svg>
         </button>
@@ -131,6 +134,15 @@
         <h1 class="menu-title">MathGraph <span>Arena</span></h1>
         <p class="menu-tagline">Đấu trường đồ thị hàm số — ngắm bắn bằng toán học.</p>
 
+        <div class="menu-tabs" role="tablist" aria-label="Kiểu chơi">
+          <button type="button" role="tab" data-tab="local" aria-controls="paneLocal">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>Cùng máy
+          </button>
+          <button type="button" role="tab" data-tab="online" aria-controls="paneOnline">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z" /></svg>Online <span class="tab-badge">P2P</span>
+          </button>
+        </div>
+
         <div class="mode-select" role="radiogroup" aria-label="Chế độ chơi">
           <button type="button" class="mode-card" data-mode="1v1" role="radio">
             <span class="mode-dots"><i class="a"></i><b>vs</b><i class="b"></i></span>
@@ -144,6 +156,7 @@
           </button>
         </div>
 
+        <div class="menu-pane" id="paneLocal" data-pane="local" role="tabpanel">
         <div class="roster" id="roster"></div>
 
         <div class="menu-options">
@@ -177,6 +190,88 @@
           </button>
         </div>
         <p class="menu-foot">Mẹo: rê chuột trên sân để đo Δx, Δy từ nhân vật tới mục tiêu.</p>
+        </div>
+
+        <div class="menu-pane" id="paneOnline" data-pane="online" role="tabpanel" hidden>
+          <label class="name-field">
+            <span>Tên của bạn</span>
+            <input id="onlineName" maxlength="14" autocomplete="nickname" spellcheck="false" placeholder="vd: Linh">
+          </label>
+          <div class="online-grid">
+            <section class="online-card">
+              <h3>Tạo phòng mới</h3>
+              <p>Bạn làm chủ phòng với chế độ đang chọn ở trên, rồi gửi link mời cho bạn bè.</p>
+              <button type="button" class="btn primary" id="hostBtn">Tạo phòng
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+            </section>
+            <section class="online-card">
+              <h3>Vào phòng</h3>
+              <input id="joinCode" class="code-input" maxlength="6" placeholder="MÃ PHÒNG" autocomplete="off"
+                spellcheck="false" autocapitalize="characters" aria-label="Mã phòng">
+              <button type="button" class="btn ghost" id="joinBtn">Vào phòng
+                <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              </button>
+            </section>
+          </div>
+          <p class="online-status" id="onlineStatus" role="status" aria-live="polite"></p>
+          <div class="menu-actions online-actions">
+            <p class="menu-foot">Kết nối trực tiếp giữa các trình duyệt (WebRTC) — không cần tài khoản, không lưu dữ liệu.</p>
+            <button type="button" class="btn ghost" id="onlineHelpBtn">Cách chơi</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════════════════ SẢNH CHỜ ONLINE ═════════════════════ -->
+    <div class="screen" id="lobbyScreen" hidden>
+      <div class="menu-card lobby-card">
+        <div class="lobby-head">
+          <div>
+            <span class="eyebrow">Phòng online · <span id="lobbyRole">Chủ phòng</span></span>
+            <h2 class="lobby-code" id="lobbyCode">------</h2>
+          </div>
+          <div class="lobby-share">
+            <button type="button" class="btn ghost small" id="copyLinkBtn">
+              <svg viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1" /><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" /></svg>
+              <span id="copyLinkLabel">Sao chép link mời</span>
+            </button>
+            <button type="button" class="btn ghost small" id="copyCodeBtn" aria-label="Sao chép mã phòng">
+              <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>
+              Mã
+            </button>
+          </div>
+        </div>
+        <div class="invite-link" id="inviteLink"></div>
+
+        <div class="lobby-settings">
+          <div class="seg" id="lobbyMode" role="radiogroup" aria-label="Chế độ">
+            <button type="button" data-mode="1v1">1 vs 1</button>
+            <button type="button" data-mode="2v2">2 vs 2</button>
+          </div>
+          <div class="seg" id="lobbyTime" role="radiogroup" aria-label="Thời gian lượt">
+            <button type="button" data-time="20">20s</button>
+            <button type="button" data-time="30">30s</button>
+            <button type="button" data-time="45">45s</button>
+            <button type="button" data-time="60">60s</button>
+          </div>
+          <label class="opt switch">
+            <span class="opt-label">Sát thương đồng đội</span>
+            <input type="checkbox" id="lobbyFF">
+            <span class="switch-ui" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="seats" id="seats"></div>
+        <ul class="lobby-feed" id="lobbyFeed" aria-live="polite"></ul>
+        <p class="lobby-status" id="lobbyStatus" role="status"></p>
+
+        <div class="menu-actions">
+          <button type="button" class="btn ghost" id="leaveLobbyBtn">Rời phòng</button>
+          <button type="button" class="btn primary" id="lobbyStartBtn">Bắt đầu trận
+            <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -192,6 +287,7 @@
           <thead><tr><th>Người chơi</th><th>HP</th><th>Bắn</th><th>Trúng</th><th>Sát thương</th><th>Bắn nhầm</th></tr></thead>
           <tbody id="statsBody"></tbody>
         </table>
+        <p class="over-wait" id="overWait" hidden>Đang chờ chủ phòng chọn tái đấu…</p>
         <div class="menu-actions">
           <button type="button" class="btn ghost" id="toMenuBtn">Về menu</button>
           <button type="button" class="btn primary" id="rematchBtn">Tái đấu (bản đồ mới)</button>
@@ -240,7 +336,7 @@
     <div class="modal" id="confirmModal" hidden role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
       <div class="modal-card confirm-card">
         <h2 id="confirmTitle">Tạm dừng</h2>
-        <p>Trận đấu đang tạm dừng. Thoát về menu sẽ huỷ trận hiện tại.</p>
+        <p id="confirmText">Trận đấu đang tạm dừng. Thoát về menu sẽ huỷ trận hiện tại.</p>
         <div class="menu-actions">
           <button type="button" class="btn ghost" id="quitBtn">Thoát về menu</button>
           <button type="button" class="btn primary" id="resumeBtn">Tiếp tục</button>

@@ -5,7 +5,14 @@
  *                    └───────────── hết giờ ──────────────────────────↗            └→ over
  *
  * Game không chạm vào DOM: UI lắng nghe các sự kiện 'setup' | 'turn' | 'phase' | 'update' |
- * 'toast' | 'over' và gọi các hành động castSpell() / setFacing() / fire().
+ * 'fired' | 'timeout' | 'toast' | 'over' và gửi hành động qua request({ kind, ... }).
+ *
+ * CHƠI ONLINE (xem js/net/online.js) — mô hình "chủ phòng quyết định":
+ *  - Mọi hành động (đổi hướng / phép / bắn) đi qua request() → gửi cho chủ phòng → chủ phòng kiểm
+ *    tra rồi phát lại cho tất cả → mỗi máy gọi apply(). Vì cùng seed + cùng hành động, các máy tự
+ *    mô phỏng ra cùng một phát bắn (chỉ vài chục byte mỗi lượt qua mạng).
+ *  - Chỉ chủ phòng (authority = true) được chuyển lượt, xử lý hết giờ và kết thúc trận. Đầu mỗi
+ *    lượt chủ phòng gửi bản chốt trạng thái (snapshot) để các máy khác sửa mọi sai lệch nhỏ.
  */
 import { COMBAT, DEFAULT_NAMES, PLAYER, SHOT, SPELL_BY_ID, STARTER_FORMULA, TEAMS, TRAIL_COUNT, TURN, WORLD } from '../config.js';
 import { Emitter, clamp, createRng, randomSeed } from '../utils.js';
@@ -27,6 +34,9 @@ const END_MESSAGES = {
   limit: 'Tia đạn cạn năng lượng (đồ thị dao động quá dài).',
 };
 
+const sameCraters = (a, b) =>
+  a.length === b.length && a.every((c, i) => c.every((v, j) => Math.abs(v - b[i][j]) < 1e-6));
+
 export class Game extends Emitter {
   constructor({ effects, sfx, terrainScale = 1 }) {
     super();
@@ -41,12 +51,47 @@ export class Game extends Emitter {
     this.time = 0;
     this.current = null;
     this.timer = 0;
+    this.overtime = 0;
     this.turnNumber = 0;
     this.shot = null;
     this.trails = [];
+    this.craters = [];       // [x, y, r] theo thứ tự nổ — đủ để dựng lại địa hình từ seed
     this.armed = null;       // 'teleport' | 'double' | null
     this.spellUsed = false;  // mỗi lượt chỉ 1 phép
     this.winner = null;
+    this.resetNetwork();
+  }
+
+  /* ───────────────────────────── Chế độ mạng ───────────────────────────── */
+
+  /** Về chế độ chơi chung 1 máy. */
+  resetNetwork() {
+    this.authority = true;   // máy này có quyền chuyển lượt / kết thúc trận
+    this.localSeats = null;  // Set id nhân vật do máy này điều khiển (null = tất cả)
+    this.net = null;         // phiên online: nhận hành động để gửi đi
+    this.timeoutGrace = 0;
+    this.pending = null;     // trạng thái từ chủ phòng chờ áp dụng khi tia đang bay xong
+    this.awaiting = false;   // đã gửi phát bắn, chờ chủ phòng xác nhận
+  }
+
+  configureNetwork({ authority, localSeats, net, timeoutGrace }) {
+    this.authority = authority;
+    this.localSeats = new Set(localSeats);
+    this.net = net;
+    this.timeoutGrace = timeoutGrace;
+  }
+
+  setLocalSeats(seats) {
+    this.localSeats = new Set(seats);
+    this.emit('update');
+  }
+
+  get online() {
+    return !!this.net;
+  }
+
+  isLocal(p) {
+    return !!p && (!this.localSeats || this.localSeats.has(p.id));
   }
 
   /* ───────────────────────────── Thiết lập trận ───────────────────────────── */
@@ -64,13 +109,17 @@ export class Game extends Emitter {
     this.settings = settings;
     this.terrain.generate(settings.seed);
     this.effects.clear();
+    this.sfx.stopTrace();
     this.trails = [];
+    this.craters = [];
     this.shot = null;
     this.current = null;
     this.armed = null;
     this.winner = null;
     this.turnNumber = 0;
     this.paused = false;
+    this.pending = null;
+    this.awaiting = false;
 
     const perTeam = settings.mode === '2v2' ? 2 : 1;
     const spawnRng = createRng(settings.seed ^ 0x9e3779b9); // cùng seed ⇒ cùng vị trí xuất phát
@@ -99,8 +148,14 @@ export class Game extends Emitter {
 
   /* ───────────────────────────── Lượt chơi ───────────────────────────── */
 
-  get canAct() {
+  /** Đang trong lượt (chưa bắn), bất kể ai điều khiển. */
+  get inTurn() {
     return !this.paused && (this.phase === 'aiming' || this.phase === 'intro');
+  }
+
+  /** Người chơi trên MÁY NÀY có được thao tác không. */
+  get canAct() {
+    return this.inTurn && !this.awaiting && this.isLocal(this.current);
   }
 
   setPaused(paused) {
@@ -136,15 +191,22 @@ export class Game extends Emitter {
     return null;
   }
 
+  /** Chỉ máy có quyền (chơi chung máy / chủ phòng) gọi hàm này. */
   beginTurn() {
     const p = this.pickNextPlayer();
     if (!p) return this.finish();
-    this.current = p;
     p.turns += 1;
     this.turnNumber += 1;
+    return this.enterTurn(p);
+  }
+
+  enterTurn(p) {
+    this.current = p;
     this.armed = null;
     this.spellUsed = false;
+    this.awaiting = false;
     this.timer = this.settings.turnTime;
+    this.overtime = 0;
     this.lastTick = Math.ceil(this.timer);
     this.setPhase('intro');
     this.sfx.play('turn');
@@ -152,41 +214,111 @@ export class Game extends Emitter {
     this.emit('update');
   }
 
+  timeout() {
+    if (!this.inTurn) return;
+    this.sfx.play('timeout');
+    this.toast(`⏱ Hết giờ! ${this.current.name} mất lượt.`, 'warn');
+    this.armed = null;
+    this.awaiting = false;
+    this.setPhase('resolving');
+    this.emit('timeout', { turn: this.turnNumber });
+  }
+
+  /* ───────────────────────────── Hành động ───────────────────────────── */
+
+  /**
+   * Hành động của người chơi trên máy này (từ HUD / phím tắt):
+   *   { kind: 'facing', dir } | { kind: 'spell', id } | { kind: 'fire', formula, dir }
+   * Kiểm tra ngay tại chỗ để báo lỗi tức thì; online thì gửi cho chủ phòng thay vì tự áp dụng.
+   */
+  request(action) {
+    if (!this.canAct) return { ok: false };
+    const error = this.validate(action);
+    if (error) {
+      this.sfx.play('error');
+      this.toast(error, action.kind === 'fire' ? 'error' : 'warn');
+      return { ok: false, error };
+    }
+    if (this.net) {
+      if (action.kind === 'fire') {
+        this.awaiting = true;
+        this.emit('update');
+      }
+      this.net.sendAction(action);
+      return { ok: true, pending: true };
+    }
+    return this.apply(action);
+  }
+
+  /** Trả về thông báo lỗi nếu hành động không hợp lệ ở thời điểm hiện tại, ngược lại null. */
+  validate(action) {
+    if (!this.inTurn || !this.current) return 'Chưa tới lượt.';
+    switch (action?.kind) {
+      case 'facing':
+        return action.dir === 1 || action.dir === -1 ? null : 'Hướng bắn không hợp lệ.';
+      case 'spell':
+        return this.spellError(action.id);
+      case 'fire': {
+        const prep = this.prepareShot(action.formula, action.dir);
+        return prep.ok ? null : prep.error;
+      }
+      default:
+        return 'Hành động không hợp lệ.';
+    }
+  }
+
+  /** Áp dụng hành động (đã được kiểm tra; online: đã được chủ phòng xác nhận). */
+  apply(action) {
+    const error = this.validate(action);
+    if (error) return { ok: false, error };
+    if (action.kind === 'facing') return this.setFacing(action.dir);
+    if (action.kind === 'spell') return this.castSpell(action.id);
+    return this.fire(action.formula, action.dir);
+  }
+
   setFacing(dir) {
-    if (!this.canAct || this.current.facing === dir) return;
-    this.current.facing = dir;
-    this.sfx.play('click');
-    this.emit('update');
+    if (this.current.facing !== dir) {
+      this.current.facing = dir;
+      this.sfx.play('click');
+      this.emit('update');
+    }
+    return { ok: true };
   }
 
   /* ───────────────────────────── Phép trợ giúp ───────────────────────────── */
 
+  spellError(id) {
+    const p = this.current;
+    const spell = SPELL_BY_ID[id];
+    if (!spell) return 'Phép không tồn tại.';
+    if (this.armed === id) return null; // bấm lại để huỷ
+    const status = p.spellStatus(id);
+    if (this.spellUsed) return 'Mỗi lượt chỉ dùng được 1 phép trợ giúp.';
+    if (status.charges <= 0) return `${spell.name}: đã dùng hết lượt trong trận.`;
+    if (status.cooldownLeft > 0) return `${spell.name}: hồi chiêu còn ${status.cooldownLeft} lượt.`;
+    if (id === 'heal' && p.hp >= PLAYER.maxHp) return 'Máu đang đầy, chưa cần hồi.';
+    if (id === 'shield' && p.shield) return 'Bạn đang có khiên rồi.';
+    return null;
+  }
+
   castSpell(id) {
-    if (!this.canAct) return;
     const p = this.current;
     const spell = SPELL_BY_ID[id];
 
-    if (this.armed === id) { // bấm lại để huỷ phép đang chuẩn bị
+    if (this.armed === id) { // huỷ phép đang chuẩn bị
       this.armed = null;
       this.sfx.play('click');
       this.emit('update');
-      return;
+      return { ok: true };
     }
-    const status = p.spellStatus(id);
-    if (this.spellUsed) return this.toast('Mỗi lượt chỉ dùng được 1 phép trợ giúp.', 'warn');
-    if (status.charges <= 0) return this.toast(`${spell.name}: đã dùng hết lượt trong trận.`, 'warn');
-    if (status.cooldownLeft > 0) return this.toast(`${spell.name}: hồi chiêu còn ${status.cooldownLeft} lượt.`, 'warn');
-
     if (spell.kind === 'instant') {
       if (id === 'heal') {
-        if (p.hp >= PLAYER.maxHp) return this.toast('Máu đang đầy, chưa cần hồi.', 'warn');
         const gained = Math.min(spell.amount, PLAYER.maxHp - p.hp);
         p.hp += gained;
         this.effects.heal(p.x, p.y);
         this.effects.text(p.x, p.y - 28, `+${gained}`, '#5dfca0', 20);
         this.sfx.play('heal');
       } else if (id === 'shield') {
-        if (p.shield) return this.toast('Bạn đang có khiên rồi.', 'warn');
         p.shield = true;
         this.effects.shieldUp(p.x, p.y);
         this.sfx.play('shield');
@@ -199,29 +331,20 @@ export class Game extends Emitter {
       this.sfx.play('arm');
     }
     this.emit('update');
+    return { ok: true };
   }
 
   /* ───────────────────────────── Bắn ───────────────────────────── */
 
-  /** Bắn công thức `formula`. Trả về { ok, error? } để UI hiển thị. */
-  fire(formula) {
-    if (!this.canAct) return { ok: false };
+  /** Biên dịch + truy vết thử phát bắn (không đổi trạng thái). */
+  prepareShot(formula, dir = this.current?.facing) {
     const compiled = compileFormula(formula);
-    if (!compiled.ok) {
-      this.sfx.play('error');
-      this.toast(compiled.error, 'error');
-      return compiled;
-    }
+    if (!compiled.ok) return compiled;
     const p = this.current;
-    const dir = p.facing;
     const anchor = anchorPoint(compiled.fn, dir);
     if (!anchor) {
-      const error = 'f(x) không xác định quanh x = 0 nên đồ thị không thể xuất phát từ nhân vật.';
-      this.sfx.play('error');
-      this.toast(error, 'error');
-      return { ok: false, error };
+      return { ok: false, error: 'f(x) không xác định quanh x = 0 nên đồ thị không thể xuất phát từ nhân vật.' };
     }
-
     const trace = traceGraph({
       fn: compiled.fn,
       anchor,
@@ -231,14 +354,19 @@ export class Game extends Emitter {
       players: this.players.filter((q) => q.alive),
       shooter: p,
     });
-
     // Đồ thị không thể rời nhân vật (vd. sqrt(x) khi bắn trái) ⇒ báo lỗi, không mất lượt/phép.
     if (trace.points.length <= 1 && trace.end.reason === 'domain') {
-      const error = `f(x) không xác định khi x ${dir > 0 ? '> 0' : '< 0'} — hãy đổi hướng bắn hoặc sửa hàm.`;
-      this.sfx.play('error');
-      this.toast(error, 'error');
-      return { ok: false, error };
+      return { ok: false, error: `f(x) không xác định khi x ${dir > 0 ? '> 0' : '< 0'} — hãy đổi hướng bắn hoặc sửa hàm.` };
     }
+    return { ok: true, compiled, trace };
+  }
+
+  fire(formula, dir = this.current.facing) {
+    const p = this.current;
+    p.facing = dir;
+    const prep = this.prepareShot(formula, dir);
+    if (!prep.ok) return prep;
+    const { trace, compiled } = prep;
 
     const kind = this.armed === 'teleport' ? 'teleport' : 'damage';
     const double = this.armed === 'double';
@@ -262,9 +390,11 @@ export class Game extends Emitter {
       head: null,
     };
     this.armed = null;
+    this.awaiting = false;
     this.setPhase('firing');
     this.sfx.play('fire');
     this.sfx.startTrace();
+    this.emit('fired', { player: p, formula: formula.trim() });
     this.emit('update');
     return { ok: true };
   }
@@ -307,6 +437,7 @@ export class Game extends Emitter {
   explode(x, y, double, shooter) {
     const radius = COMBAT.blastRadius * (double ? COMBAT.doubleFactor : 1);
     const damage = COMBAT.damage * (double ? COMBAT.doubleFactor : 1);
+    this.craters.push([x, y, radius]);
     this.terrain.carve(x, y, radius);
     this.effects.explosion(x, y, radius, TEAMS[shooter.team].color, double);
     this.sfx.play('explosion', { big: double });
@@ -386,6 +517,78 @@ export class Game extends Emitter {
     this.sfx.play('teleport');
   }
 
+  /* ───────────────────────────── Đồng bộ online ───────────────────────────── */
+
+  /** Bản chốt trạng thái (gửi từ chủ phòng) — nhỏ gọn, JSON được. */
+  snapshot() {
+    return {
+      turn: this.turnNumber,
+      current: this.current?.id ?? null,
+      winner: this.winner,
+      nextTeam: this.nextTeam,
+      teamCursor: { ...this.teamCursor },
+      craters: this.craters.map((c) => [...c]),
+      players: this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        x: p.x,
+        y: p.y,
+        hp: p.hp,
+        alive: p.alive,
+        gone: p.gone,
+        shield: p.shield,
+        facing: p.facing,
+        turns: p.turns,
+        deathCause: p.deathCause ?? null,
+        spells: JSON.parse(JSON.stringify(p.spells)),
+        stats: { ...p.stats },
+      })),
+    };
+  }
+
+  /** Ghi đè trạng thái bằng bản chốt của chủ phòng (sửa mọi sai lệch nhỏ). */
+  applyState(s) {
+    this.turnNumber = s.turn;
+    this.nextTeam = s.nextTeam;
+    this.teamCursor = { ...s.teamCursor };
+    if (!sameCraters(this.craters, s.craters)) this.terrain.rebuild(this.settings.seed, s.craters);
+    this.craters = s.craters.map((c) => [...c]);
+    for (const ps of s.players) {
+      const p = this.players.find((q) => q.id === ps.id);
+      if (!p) continue;
+      const { spells, stats, ...fields } = ps;
+      Object.assign(p, fields);
+      p.spells = spells;
+      p.stats = stats;
+      p.vy = 0;
+      p.grounded = false;
+    }
+    this.emit('update');
+  }
+
+  /** Máy khách nhận 'turn' | 'over' từ chủ phòng — áp dụng ngay khi không còn tia đang bay. */
+  receive(kind, state) {
+    this.pending = { kind, state };
+    this.flushPending();
+  }
+
+  flushPending() {
+    if (!this.pending || this.phase === 'firing') return;
+    const { kind, state } = this.pending;
+    this.pending = null;
+    this.applyState(state);
+    if (kind === 'turn') this.enterTurn(this.players.find((p) => p.id === state.current));
+    else this.finish(state.winner, state.forfeit ?? null);
+  }
+
+  /** Một đội không còn ai điều khiển (rời phòng) ⇒ xử thua. */
+  forfeit(team) {
+    if (this.phase === 'over') return;
+    this.sfx.stopTrace();
+    this.shot = null;
+    this.finish(team === 'A' ? 'B' : 'A', team);
+  }
+
   /* ───────────────────────────── Vòng lặp ───────────────────────────── */
 
   update(dt) {
@@ -406,11 +609,10 @@ export class Game extends Emitter {
           this.lastTick = sec;
           if (sec <= 5 && sec > 0) this.sfx.play('tick', { urgent: sec <= 3 });
         }
-        if (this.timer <= 0) {
-          this.sfx.play('timeout');
-          this.toast(`⏱ Hết giờ! ${this.current.name} mất lượt.`, 'warn');
-          this.armed = null;
-          this.setPhase('resolving');
+        // Online: chủ phòng chờ thêm một chút để phát bắn "phút chót" kịp tới qua mạng.
+        if (this.timer <= 0 && this.authority) {
+          this.overtime += dt;
+          if (this.overtime >= this.timeoutGrace) this.timeout();
         }
         break;
       }
@@ -419,11 +621,13 @@ export class Game extends Emitter {
         break;
       case 'resolving': {
         const settled = this.players.every((p) => p.gone || p.grounded);
-        if ((this.phaseTime >= TURN.resolveMin && settled) || this.phaseTime >= TURN.resolveMax) this.afterResolve();
+        const done = (this.phaseTime >= TURN.resolveMin && settled) || this.phaseTime >= TURN.resolveMax;
+        if (done && this.authority) this.afterResolve();
         break;
       }
       default:
     }
+    if (this.pending) this.flushPending();
   }
 
   updatePhysics(dt) {
@@ -446,17 +650,22 @@ export class Game extends Emitter {
     const aliveA = this.players.some((p) => p.team === 'A' && p.alive);
     const aliveB = this.players.some((p) => p.team === 'B' && p.alive);
     if (!aliveA || !aliveB) return this.finish();
-    this.beginTurn();
+    return this.beginTurn();
   }
 
-  finish() {
-    const aliveA = this.players.some((p) => p.team === 'A' && p.alive);
-    const aliveB = this.players.some((p) => p.team === 'B' && p.alive);
-    this.winner = aliveA && !aliveB ? 'A' : aliveB && !aliveA ? 'B' : null;
+  /** Kết thúc trận. `winner` bỏ trống ⇒ tự tính theo số người còn sống. */
+  finish(winner, forfeit = null) {
+    if (winner === undefined) {
+      const aliveA = this.players.some((p) => p.team === 'A' && p.alive);
+      const aliveB = this.players.some((p) => p.team === 'B' && p.alive);
+      winner = aliveA && !aliveB ? 'A' : aliveB && !aliveA ? 'B' : null;
+    }
+    this.winner = winner;
     this.current = null;
+    this.awaiting = false;
     this.setPhase('over');
     this.sfx.play('win');
-    this.emit('over', { winner: this.winner, players: this.players, turns: this.turnNumber });
+    this.emit('over', { winner, forfeit, players: this.players, turns: this.turnNumber });
   }
 
   toast(text, type = 'info') {

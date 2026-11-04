@@ -3,13 +3,13 @@
  *
  * - `canvas` (offscreen) chứa hình ảnh địa hình, vẽ ở độ phân giải `scale` (1x hoặc 2x cho màn retina).
  * - `mask` (Uint8Array W×H, độ phân giải logic) là dữ liệu va chạm: 1 = đất, 0 = trống.
- *   Mask được đọc lại từ kênh alpha (getImageData) sau mỗi lần thay đổi ⇒ "thấy gì, chạm nấy".
- * - Phá huỷ: vẽ hình tròn với globalCompositeOperation = 'destination-out' rồi cập nhật mask
- *   cho vùng bị ảnh hưởng.
+ *   Mask được tính thuần toán học từ cùng danh sách hình dùng để vẽ (xem mask.js) ⇒ giống hệt
+ *   nhau trên mọi máy — điều kiện cần để chơi online không bị lệch.
+ * - Phá huỷ: vẽ hình tròn với globalCompositeOperation = 'destination-out' lên ảnh, đồng thời
+ *   khoét đúng hình tròn đó trong mask.
  */
 import { createRng, TAU } from '../utils.js';
-
-const SOLID_ALPHA = 110; // ngưỡng alpha để coi một pixel là đất
+import { carveCircle, rasterizeShapes } from './mask.js';
 
 const PALETTE = {
   top: '#2c3770',
@@ -141,8 +141,14 @@ export class Terrain {
       i++;
     }
 
+    this.mask = rasterizeShapes(shapes, w, h);
     this.paint(shapes, rng);
-    this.rebuildMask(0, 0, w, h);
+  }
+
+  /** Dựng lại bản đồ từ seed + danh sách hố [x, y, r] (dùng khi đồng bộ trạng thái online). */
+  rebuild(seed, craters) {
+    this.generate(seed);
+    for (const [x, y, r] of craters) this.carve(x, y, r);
   }
 
   /** Vẽ địa hình: thân gradient + hoạ tiết gạch chéo + viền phát sáng + ánh sáng mép trên. */
@@ -255,7 +261,7 @@ export class Terrain {
 
   /* ───────────────────────────── Phá huỷ ───────────────────────────── */
 
-  /** Khoét một hố tròn bán kính r tại (cx, cy) — trả về true nếu có đất bị phá. */
+  /** Khoét một hố tròn bán kính r tại (cx, cy) — trả về số pixel đất bị phá. */
   carve(cx, cy, r) {
     const ctx = this.ctx;
     ctx.save();
@@ -286,34 +292,6 @@ export class Terrain {
     ctx.stroke();
     ctx.restore();
 
-    const pad = 14;
-    return this.rebuildMask(cx - r - pad, cy - r - pad, cx + r + pad, cy + r + pad);
-  }
-
-  /** Đọc lại kênh alpha của vùng [x0,x1)×[y0,y1) vào mask. Trả về số pixel đất bị mất. */
-  rebuildMask(x0, y0, x1, y1) {
-    const { w, h, scale } = this;
-    const ax = Math.max(0, Math.floor(x0));
-    const ay = Math.max(0, Math.floor(y0));
-    const bx = Math.min(w, Math.ceil(x1));
-    const by = Math.min(h, Math.ceil(y1));
-    if (bx <= ax || by <= ay) return 0;
-
-    const bw = bx - ax;
-    const data = this.ctx.getImageData(ax * scale, ay * scale, bw * scale, (by - ay) * scale).data;
-    const rowStride = bw * scale * 4;
-    const half = scale >> 1; // lấy mẫu giữa mỗi khối scale×scale
-    let removed = 0;
-    for (let y = ay; y < by; y++) {
-      const row = ((y - ay) * scale + half) * rowStride;
-      for (let x = ax; x < bx; x++) {
-        const alpha = data[row + ((x - ax) * scale + half) * 4 + 3];
-        const idx = y * w + x;
-        const solid = alpha > SOLID_ALPHA ? 1 : 0;
-        if (this.mask[idx] && !solid) removed++;
-        this.mask[idx] = solid;
-      }
-    }
-    return removed;
+    return carveCircle(this.mask, this.w, this.h, cx, cy, r);
   }
 }

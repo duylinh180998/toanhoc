@@ -1,6 +1,6 @@
 /**
  * HUD — nối DOM (bảng điều khiển, bảng đội, banner, toast, phím tắt) với Game.
- * Chỉ đọc trạng thái Game và gọi các hành động công khai của nó.
+ * Chỉ đọc trạng thái Game; mọi thao tác đi qua game.request() (chơi online sẽ được gửi cho chủ phòng).
  */
 import { PLAYER, SPELLS, SPELL_BY_ID, TEAMS } from '../config.js';
 import { anchorPoint, compileFormula } from '../math/formula.js';
@@ -81,7 +81,7 @@ export class Hud {
       btn.innerHTML = `${SPELL_ICONS[spell.id]}<span class="spell-name">${spell.name.replace(' Sát thương', '')}</span>`
         + `<span class="spell-pips">${'<i></i>'.repeat(spell.charges)}</span><span class="spell-cd" hidden></span>`;
       btn.addEventListener('click', () => {
-        this.game.castSpell(spell.id);
+        this.game.request({ kind: 'spell', id: spell.id });
         this.focusInput();
       });
       this.el.spells.append(btn);
@@ -141,7 +141,7 @@ export class Hud {
     fire.addEventListener('click', () => this.fire());
     for (const btn of dirButtons) {
       btn.addEventListener('click', () => {
-        this.game.setFacing(Number(btn.dataset.dir));
+        this.game.request({ kind: 'facing', dir: Number(btn.dataset.dir) });
         this.focusInput();
       });
     }
@@ -164,9 +164,9 @@ export class Hud {
       const { game } = this;
       if (!game.canAct) return;
       const key = e.key.toLowerCase();
-      if (key === 'arrowleft' || key === 'a') game.setFacing(-1);
-      else if (key === 'arrowright' || key === 'd') game.setFacing(1);
-      else if (key >= '1' && key <= '4') game.castSpell(SPELLS[Number(key) - 1].id);
+      if (key === 'arrowleft' || key === 'a') game.request({ kind: 'facing', dir: -1 });
+      else if (key === 'arrowright' || key === 'd') game.request({ kind: 'facing', dir: 1 });
+      else if (key >= '1' && key <= '4') game.request({ kind: 'spell', id: SPELLS[Number(key) - 1].id });
       else if (key === 'enter') this.fire();
       else if (key === 'f') this.focusInput();
       else return;
@@ -181,12 +181,16 @@ export class Hud {
       this.refresh();
     });
     game.on('turn', ({ player, number }) => {
-      this.el.input.value = player.draft ?? '';
+      // Online: lượt của người khác thì ô nhập để trống (sẽ hiện công thức họ bắn).
+      this.el.input.value = game.isLocal(player) ? player.draft ?? '' : '';
       this.validate();
       this.showBanner(player);
       if (this.el.turnNo) this.el.turnNo.textContent = `Lượt ${number}`;
       this.refresh();
       this.focusInput();
+    });
+    game.on('fired', ({ player, formula }) => {
+      if (!game.isLocal(player)) this.el.input.value = formula; // xem đối thủ vừa bắn hàm gì
     });
     game.on('phase', () => this.refresh());
     game.on('update', () => this.refresh());
@@ -256,7 +260,7 @@ export class Hud {
   fire() {
     const { game } = this;
     if (!game.canAct) return;
-    const res = game.fire(this.el.input.value);
+    const res = game.request({ kind: 'fire', formula: this.el.input.value, dir: game.current.facing });
     if (!res.ok) {
       this.el.field.classList.remove('shake');
       void this.el.field.offsetWidth; // khởi động lại animation
@@ -307,7 +311,10 @@ export class Hud {
     el.fire.disabled = !canAct;
     el.fire.classList.toggle('teleport', game.armed === 'teleport');
     el.fire.classList.toggle('double', game.armed === 'double');
-    el.fireLabel.textContent = game.armed === 'teleport' ? 'DỊCH CHUYỂN' : game.armed === 'double' ? 'BẮN x2' : 'BẮN';
+    el.fireLabel.textContent = game.awaiting
+      ? 'ĐANG GỬI…'
+      : game.armed === 'teleport' ? 'DỊCH CHUYỂN' : game.armed === 'double' ? 'BẮN x2' : 'BẮN';
+    this.renderHint();
     for (const btn of el.dirButtons) {
       btn.disabled = !canAct;
       btn.classList.toggle('on', !!p && Number(btn.dataset.dir) === p.facing);
@@ -371,8 +378,29 @@ export class Hud {
       if (!q.ui) continue;
       q.ui.card.classList.toggle('active', q === p && game.phase !== 'over');
       q.ui.card.classList.toggle('dead', !q.alive);
+      q.ui.card.classList.toggle('me', game.online && game.isLocal(q));
       q.ui.hp.textContent = q.alive ? `${q.hp}` : '✕';
       q.ui.bar.style.transform = `scaleX(${q.hp / PLAYER.maxHp})`;
+    }
+  }
+
+  /** Online: thông báo đang chờ người khác / đang gửi phát bắn thay cho dòng kiểm tra công thức. */
+  renderHint() {
+    const { game, el } = this;
+    const p = game.current;
+    let wait = null;
+    if (game.online && game.inTurn && p && !game.isLocal(p)) wait = `⏳ Đang chờ ${p.name} ra đòn…`;
+    else if (game.awaiting) wait = 'Đang gửi phát bắn tới chủ phòng…';
+    if (wait) {
+      el.msg.textContent = wait;
+      el.msg.className = 'formula-msg wait';
+      el.state.className = 'formula-state';
+      el.state.textContent = '';
+      el.field.classList.remove('invalid');
+      this.waiting = true;
+    } else if (this.waiting) {
+      this.waiting = false;
+      this.validate();
     }
   }
 

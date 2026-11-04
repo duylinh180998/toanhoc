@@ -1,18 +1,21 @@
-/** Các màn hình phủ: menu bắt đầu, kết thúc trận, hướng dẫn, tạm dừng. */
+/** Các màn hình phủ: menu bắt đầu (tab Cùng máy / Online), kết thúc trận, hướng dẫn, tạm dừng. */
 import { DEFAULT_NAMES, PLAYER, SPELLS, TEAMS, TURN } from '../config.js';
 import { randomSeed, storage } from '../utils.js';
+import { LobbyUI } from './lobby.js';
 
 const $ = (id) => document.getElementById(id);
 
 export class Screens {
-  constructor(game, sfx) {
+  constructor(game, sfx, session) {
     this.game = game;
     this.sfx = sfx;
+    this.session = session;
     this.el = {
       menu: $('menuScreen'),
       over: $('overScreen'),
       help: $('helpModal'),
       confirm: $('confirmModal'),
+      lobby: $('lobbyScreen'),
       roster: $('roster'),
       seedBtn: $('seedBtn'),
       seedText: $('seedText'),
@@ -31,16 +34,48 @@ export class Screens {
       seed: randomSeed(),
     };
 
+    this.lobbyUI = new LobbyUI({ game, sfx, session, screens: this });
+    this.tab = this.lobbyUI.invited ? 'online' : storage.get('mga.tab', 'local');
+
     this.bindMenu();
+    this.bindTabs();
     this.bindOver();
     this.bindModals();
     this.syncMenu();
+    this.syncTabs();
     this.preview();
     game.on('over', (result) => setTimeout(() => this.showOver(result), 1300));
   }
 
   isOverlayOpen() {
-    return [this.el.menu, this.el.over, this.el.help, this.el.confirm].some((n) => !n.hidden);
+    return [this.el.menu, this.el.over, this.el.help, this.el.confirm, this.el.lobby].some((n) => !n.hidden);
+  }
+
+  /** Ẩn mọi màn hình phủ (khi trận online bắt đầu). */
+  hideAll() {
+    for (const key of ['menu', 'over', 'confirm', 'lobby']) this.el[key].hidden = true;
+  }
+
+  /* ───────────────────────────── Tab Cùng máy / Online ───────────────────────────── */
+
+  bindTabs() {
+    document.querySelectorAll('.menu-tabs [data-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.tab = btn.dataset.tab;
+        storage.set('mga.tab', this.tab);
+        this.sfx.play('click');
+        this.syncTabs();
+      });
+    });
+  }
+
+  syncTabs() {
+    document.querySelectorAll('.menu-tabs [data-tab]').forEach((btn) => {
+      btn.setAttribute('aria-selected', String(btn.dataset.tab === this.tab));
+    });
+    document.querySelectorAll('[data-pane]').forEach((pane) => {
+      pane.hidden = pane.dataset.pane !== this.tab;
+    });
   }
 
   save() {
@@ -87,8 +122,9 @@ export class Screens {
     });
     $('startBtn').addEventListener('click', () => this.startMatch());
     $('menuHelpBtn').addEventListener('click', () => this.openHelp());
+    $('onlineHelpBtn').addEventListener('click', () => this.openHelp());
     this.el.menu.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target instanceof HTMLInputElement) this.startMatch();
+      if (e.key === 'Enter' && e.target.closest('#paneLocal') && e.target instanceof HTMLInputElement) this.startMatch();
     });
   }
 
@@ -137,10 +173,14 @@ export class Screens {
     this.game.start();
   }
 
-  showMenu() {
-    this.el.over.hidden = true;
-    this.el.confirm.hidden = true;
+  showMenu(tab) {
+    if (this.session.active) this.session.leave();
+    this.hideAll();
     this.game.setPaused(false);
+    if (tab) {
+      this.tab = tab;
+      this.syncTabs();
+    }
     this.settings.seed = randomSeed();
     this.syncMenu();
     this.preview();
@@ -151,14 +191,30 @@ export class Screens {
 
   bindOver() {
     $('rematchBtn').addEventListener('click', () => {
+      if (this.session.active) {
+        this.session.startMatch(); // chủ phòng: tái đấu với bản đồ mới cho cả phòng
+        return;
+      }
       this.settings.seed = randomSeed();
       this.syncMenu();
       this.startMatch();
     });
-    $('toMenuBtn').addEventListener('click', () => this.showMenu());
+    $('toMenuBtn').addEventListener('click', () => {
+      if (this.session.isHost) this.session.backToLobby();
+      else this.showMenu(this.session.active ? 'online' : undefined);
+    });
   }
 
-  showOver({ winner, players, turns }) {
+  /** Nút ở màn kết thúc tuỳ vai trò: chơi chung máy / chủ phòng / khách. */
+  syncOverButtons() {
+    const { session } = this;
+    const guest = session.active && !session.isHost;
+    $('rematchBtn').hidden = guest;
+    $('overWait').hidden = !guest;
+    $('toMenuBtn').textContent = session.isHost ? 'Về sảnh' : guest ? 'Rời phòng' : 'Về menu';
+  }
+
+  showOver({ winner, forfeit, players, turns }) {
     if (this.game.phase !== 'over') return;
     const title = $('overTitle');
     const trophy = $('overTrophy');
@@ -167,7 +223,9 @@ export class Screens {
     title.style.color = color;
     trophy.style.setProperty('--c', color);
     const mvp = [...players].sort((a, b) => b.stats.damage - a.stats.damage)[0];
-    $('overSub').textContent = `Sau ${turns} lượt` + (mvp?.stats.damage ? ` · MVP: ${mvp.name} (${mvp.stats.damage} sát thương)` : '');
+    $('overSub').textContent = forfeit
+      ? `${TEAMS[forfeit].name} không còn ai trong phòng — thắng do đối thủ bỏ cuộc.`
+      : `Sau ${turns} lượt` + (mvp?.stats.damage ? ` · MVP: ${mvp.name} (${mvp.stats.damage} sát thương)` : '');
 
     const body = $('statsBody');
     body.innerHTML = '';
@@ -181,6 +239,7 @@ export class Screens {
       tr.firstChild.append(`${p.id} · ${p.name}`);
       body.append(tr);
     }
+    this.syncOverButtons();
     this.el.over.hidden = false;
   }
 
@@ -203,12 +262,12 @@ export class Screens {
     });
 
     $('menuBtn').addEventListener('click', () => {
-      if (!this.el.menu.hidden) return;
-      if (this.inMatch()) this.pause();
+      if (!this.el.menu.hidden || !this.el.lobby.hidden) return;
+      if (this.inMatch() || this.session.active) this.pause();
       else this.showMenu();
     });
     $('resumeBtn').addEventListener('click', () => this.resume());
-    $('quitBtn').addEventListener('click', () => this.showMenu());
+    $('quitBtn').addEventListener('click', () => this.showMenu(this.session.active ? 'online' : undefined));
 
     this.el.sound.classList.toggle('muted', this.sfx.muted);
     this.el.sound.addEventListener('click', () => {
@@ -222,7 +281,7 @@ export class Screens {
       if (e.key !== 'Escape') return;
       if (!this.el.help.hidden) this.closeHelp();
       else if (!this.el.confirm.hidden) this.resume();
-      else if (this.el.menu.hidden && this.el.over.hidden && this.inMatch() && e.target !== $('formula')) this.pause();
+      else if (this.el.menu.hidden && this.el.over.hidden && this.el.lobby.hidden && this.inMatch() && e.target !== $('formula')) this.pause();
     });
   }
 
@@ -231,7 +290,7 @@ export class Screens {
   }
 
   openHelp() {
-    if (this.inMatch() && !this.game.paused) {
+    if (this.inMatch() && !this.game.paused && !this.session.active) {
       this.game.setPaused(true);
       this.pausedByHelp = true;
     }
@@ -247,14 +306,24 @@ export class Screens {
     }
   }
 
+  /** Chơi chung máy: tạm dừng. Online: trận vẫn chạy, chỉ hỏi có muốn rời phòng không. */
   pause() {
-    this.game.setPaused(true);
+    const online = this.session.active;
+    if (!online) this.game.setPaused(true);
+    $('confirmTitle').textContent = online ? 'Rời phòng?' : 'Tạm dừng';
+    $('confirmText').textContent = online
+      ? this.session.isHost
+        ? 'Bạn là chủ phòng — rời đi sẽ đóng phòng và kết thúc trận của mọi người.'
+        : 'Trận vẫn tiếp tục. Nếu bạn rời đi, đồng đội sẽ điều khiển thay; đội không còn ai sẽ bị xử thua.'
+      : 'Trận đấu đang tạm dừng. Thoát về menu sẽ huỷ trận hiện tại.';
+    $('resumeBtn').textContent = online ? 'Ở lại' : 'Tiếp tục';
+    $('quitBtn').textContent = online ? 'Rời phòng' : 'Thoát về menu';
     this.el.confirm.hidden = false;
     $('resumeBtn').focus();
   }
 
   resume() {
     this.el.confirm.hidden = true;
-    this.game.setPaused(false);
+    if (!this.session.active) this.game.setPaused(false);
   }
 }

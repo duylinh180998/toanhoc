@@ -101,6 +101,8 @@ export function stepPhysics(p, terrain, dt) {
     remaining -= step;
     if (isGrounded(p, terrain)) {
       const impact = p.vy;
+      // Làm tròn xuống: vị trí đứng không phụ thuộc cách chia dt ⇒ giống nhau giữa các máy (online).
+      p.y = Math.floor(p.y);
       p.vy = 0;
       p.grounded = true;
       return impact > 260 ? 'landed' : null;
